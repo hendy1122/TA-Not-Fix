@@ -1,0 +1,24 @@
+{
+    "gas_detection": {
+        "model_path": "models/gas_detection_model.pkl",
+        "label_encoder_path": "models/label_encoder.pkl",
+        "csv_filename": "data/usv_gas_data.csv",
+        "sampling_interval": 2
+    },
+    "gps": {
+        "port": "/dev/ttyAMA0",
+        "baud_rate": 9600,
+        "csv_filename": "data/usv_gps_data.csv",
+        "sampling_interval": 5
+    },
+    "integration": {
+        "data_fusion_interval": 10,
+        "alert_threshold": 0.8,
+        "high_pollution_threshold": 300
+    },
+    "usv": {
+        "mission_duration": 3600,
+        "auto_return_on_high_pollution": true,
+        "max_pollution_exposure_time": 300
+    }
+}
