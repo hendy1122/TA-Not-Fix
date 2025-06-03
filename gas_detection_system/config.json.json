@@ -1,0 +1,17 @@
+{
+    "adc_channels": [0, 1, 2],
+    "adc_gain": 1,
+    "sampling_rate": 2,
+    "csv_output": "gas_detection_results.csv",
+    "model_file": "gas_model.pkl",
+    "label_encoder_file": "label_encoder.pkl",
+    "dataset_file": "merged_dataset.csv",
+    "sensor_names": ["TGS_2600", "TGS_2602", "TGS_2610"],
+    "voltage_to_ppm_factors": [100, 80, 150],
+    "description": {
+        "adc_channels": "ADC channels untuk sensor TGS (0=A0, 1=A1, 2=A2)",
+        "adc_gain": "Gain ADC ADS1115 (1 = ±4.096V)",
+        "sampling_rate": "Interval pembacaan sensor dalam detik",
+        "voltage_to_ppm_factors": "Faktor konversi voltage ke PPM untuk masing-masing sensor"
+    }
+}
