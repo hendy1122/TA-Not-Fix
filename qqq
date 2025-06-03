@@ -1,0 +1,17 @@
+python3 -c "
+import pandas as pd
+try:
+    df = pd.read_csv('merged.csv', sep=';')
+    print('Columns with semicolon separator:')
+    print(df.columns.tolist())
+    print(f'Shape: {df.shape}')
+    print('\\nFirst few rows:')
+    print(df.head())
+except:
+    df = pd.read_csv('merged.csv')
+    print('Columns with comma separator:')
+    print(df.columns.tolist())
+    print(f'Shape: {df.shape}')
+    print('\\nFirst few rows:')
+    print(df.head())
+"
