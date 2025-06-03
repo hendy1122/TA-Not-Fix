@@ -1,0 +1,9 @@
+sudo iwlist wlan0 scan | grep -E "ESSID|Frequency"
+sudo nano /etc/wpa_supplicant/wpa_supplicant.conf
+network={
+    ssid="Nama_Hotspot_Poco"
+    psk="Password_Hotspot"
+    key_mgmt=WPA-PSK
+}
+sudo systemctl restart dhcpcd
+sudo wpa_cli -i wlan0 reconfigure
