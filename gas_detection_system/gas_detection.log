@@ -1,0 +1,23 @@
+2025-06-03 21:18:22,464 - INFO - Configuration loaded from config.json
+2025-06-03 21:18:22,472 - INFO - ADC ADS1115 initialized successfully
+2025-06-03 21:18:22,472 - WARNING - Pre-trained model not found, training new model from dataset
+2025-06-03 21:18:22,484 - ERROR - Failed to train model: "None of [Index(['TGS 2600', 'TGS 2602', 'TGS 2610'], dtype='object')] are in the [columns]"
+2025-06-03 21:18:22,486 - ERROR - Failed to start gas detection system: "None of [Index(['TGS 2600', 'TGS 2602', 'TGS 2610'], dtype='object')] are in the [columns]"
+2025-06-03 21:35:01,539 - INFO - Configuration loaded from config.json
+2025-06-03 21:35:01,548 - INFO - Dataset shape: (359, 4)
+2025-06-03 21:35:01,549 - INFO - Dataset columns: ['TGS 2600', 'TGS 2602', 'TGS 2610', 'label']
+2025-06-03 21:35:01,557 - INFO - Labels in dataset: ['alkohol' 'normal' 'pertalite' 'pertamax']
+2025-06-03 21:35:01,570 - INFO - Baseline values calculated from normal data: {'TGS_2600': np.float64(148.5112121212121), 'TGS_2602': np.float64(51.63272727272727), 'TGS_2610': np.float64(205.3062121212121)}
+2025-06-03 21:35:01,570 - INFO - Training new model from dataset...
+2025-06-03 21:35:01,598 - INFO - Dataset shape after cleaning: (359, 4)
+2025-06-03 21:35:01,599 - INFO - Labels in dataset: ['alkohol' 'normal' 'pertalite' 'pertamax']
+2025-06-03 21:35:01,603 - INFO - Training data shape: (359, 3)
+2025-06-03 21:35:02,309 - INFO - Model trained successfully!
+2025-06-03 21:35:02,310 - INFO - Accuracy: 1.000
+2025-06-03 21:35:02,311 - INFO - Classes: ['alkohol' 'normal' 'pertalite' 'pertamax']
+2025-06-03 21:35:02,382 - INFO - Model and encoder saved successfully
+2025-06-03 21:35:02,382 - INFO - Running in simulation mode - no hardware required
+2025-06-03 21:35:02,383 - INFO - Starting gas detection system in SIMULATION mode...
+2025-06-03 21:35:02,383 - INFO - Press Ctrl+C to stop
+2025-06-03 21:38:48,546 - INFO - Detection stopped by user
+2025-06-03 21:38:48,547 - INFO - Gas detection system stopped
