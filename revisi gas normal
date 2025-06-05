@@ -1,0 +1,106 @@
+valid_gases = ['normal', 'alcohol', 'pertalite', 'pertamax', 'dexlite', 'biosolar']  # TAMBAH 'normal'
+
+if gas_type not in valid_gases:
+        self.logger.error(f"Invalid gas type. Valid options: {valid_gases}")
+        return None
+    
+    # Special instructions untuk normal data collection
+    if gas_type == 'normal':
+        input(f"Ensure sensors are in CLEAN AIR (no gas). Press Enter to start...")
+        self.logger.info("Collecting NORMAL/CLEAN AIR data...")
+    else:
+        input(f"Prepare to spray {gas_type}. Press Enter to start...")
+
+
+if gas_type not in valid_gases:
+        self.logger.error(f"Invalid gas type. Valid options: {valid_gases}")
+        return None
+    
+    # Special instructions untuk normal data collection
+    if gas_type == 'normal':
+        input(f"Ensure sensors are in CLEAN AIR (no gas). Press Enter to start...")
+        self.logger.info("Collecting NORMAL/CLEAN AIR data...")
+    else:
+        input(f"Prepare to spray {gas_type}. Press Enter to start...")
+
+print("1. Calibrate sensors")
+        print("2. Collect training data (Extended mode - unlimited range)")
+        print("3. Train machine learning model")
+        print("4. Start monitoring - Datasheet mode (accurate detection)")
+        print("5. Start monitoring - Extended mode (full range)")
+        print("6. Test single reading")
+        print("7. Switch sensor mode (Extended ↔ Datasheet)")
+        print("8. View current sensor modes")
+        print("9. Collect NORMAL/Clean Air data")  # TAMBAH BARIS INI
+        print("10. Exit")  # UBAH dari 9 ke 10
+        print("-"*60)
+
+
+
+choice = input("Select option (1-10): ").strip()  # UBAH dari 1-9 ke 1-10
+
+
+
+elif choice == '2':
+                gas_types = ['normal', 'alcohol', 'pertalite', 'pertamax', 'dexlite', 'biosolar']  # TAMBAH 'normal'
+                print("Available gas types:", ', '.join(gas_types))
+                print("⚠️  IMPORTANT: Collect 'normal' data first for baseline!")
+                gas_type = input("Enter gas type: ").strip().lower()
+
+
+elif choice == '9':  # NEW: Shortcut untuk collect normal data
+                print("🌬️  Collecting NORMAL/Clean Air baseline data")
+                print("Ensure sensors are in clean environment (no gas sources)")
+                duration = int(input("Collection duration (seconds, default 120): ") or 120)
+                gas_sensor.collect_training_data('normal', duration)
+                
+            elif choice == '10':  # Updated exit option
+                print("Exiting system...")
+                break
+
+
+
+def enhanced_predict_gas(self, readings, confidence_threshold=0.6):
+        """Enhanced prediction dengan confidence threshold untuk kondisi normal"""
+        if not self.is_model_trained:
+            return "Unknown - Model not trained", 0.0
+        
+        try:
+            with open('models/model_metadata.json', 'r') as f:
+                metadata = json.load(f)
+            feature_columns = metadata['feature_columns']
+        except:
+            feature_columns = ['TGS2600_voltage', 'TGS2600_ppm', 'TGS2602_voltage', 
+                             'TGS2602_ppm', 'TGS2610_voltage', 'TGS2610_ppm']
+        
+        feature_vector = []
+        for feature in feature_columns:
+            if feature == 'temperature':
+                feature_vector.append(self.current_temperature)
+            elif feature == 'humidity':
+                feature_vector.append(self.current_humidity)
+            else:
+                parts = feature.split('_')
+                sensor = parts[0]
+                measurement = '_'.join(parts[1:])
+                
+                if sensor in readings and measurement in readings[sensor]:
+                    value = readings[sensor][measurement]
+                    feature_vector.append(value if value is not None else 0.0)
+                else:
+                    feature_vector.append(0.0)
+        
+        features = np.array([feature_vector])
+        features = np.nan_to_num(features, nan=0.0)
+        
+        features_scaled = self.scaler.transform(features)
+        prediction = self.model.predict(features_scaled)[0]
+        probabilities = self.model.predict_proba(features_scaled)[0]
+        confidence = probabilities.max()
+        
+        # Enhanced logic: Jika confidence rendah dan prediction bukan 'normal',
+        # kemungkinan kondisi tidak dikenali (might be normal)
+        if confidence < confidence_threshold and prediction != 'normal':
+            return "Uncertain - Possibly Normal", confidence
+        
+        return prediction, confidence
