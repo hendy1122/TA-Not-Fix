@@ -1,0 +1,27 @@
+{
+  "timestamp": "2025-06-10T23:11:34.412590",
+  "accuracy": 0.9725274725274725,
+  "feature_columns": [
+    "TGS2600_voltage",
+    "TGS2600_resistance",
+    "TGS2600_rs_r0_ratio",
+    "TGS2600_ppm",
+    "TGS2602_voltage",
+    "TGS2602_resistance",
+    "TGS2602_rs_r0_ratio",
+    "TGS2602_ppm",
+    "TGS2610_voltage",
+    "TGS2610_resistance",
+    "TGS2610_rs_r0_ratio",
+    "TGS2610_ppm",
+    "temperature",
+    "humidity"
+  ],
+  "classes": [
+    "alkohol",
+    "biosolar",
+    "normal",
+    "pertalite"
+  ],
+  "model_type": "optimized_3gas"
+}

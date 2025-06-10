@@ -1,0 +1,101 @@
+{
+  "timestamp": "2025-06-11T01:40:02.299776",
+  "accuracy": 1.0,
+  "feature_columns": [
+    "TGS2600_voltage",
+    "TGS2600_resistance",
+    "TGS2600_compensated_resistance",
+    "TGS2600_rs_r0_ratio",
+    "TGS2600_ppm",
+    "TGS2602_voltage",
+    "TGS2602_resistance",
+    "TGS2602_compensated_resistance",
+    "TGS2602_rs_r0_ratio",
+    "TGS2602_ppm",
+    "TGS2610_voltage",
+    "TGS2610_resistance",
+    "TGS2610_compensated_resistance",
+    "TGS2610_rs_r0_ratio",
+    "TGS2610_ppm",
+    "temperature",
+    "humidity"
+  ],
+  "feature_importance": [
+    {
+      "feature": "TGS2600_resistance",
+      "importance": 0.13683340625900287
+    },
+    {
+      "feature": "TGS2600_compensated_resistance",
+      "importance": 0.1281934655009797
+    },
+    {
+      "feature": "TGS2600_rs_r0_ratio",
+      "importance": 0.09604221903788776
+    },
+    {
+      "feature": "TGS2600_voltage",
+      "importance": 0.08629149114460653
+    },
+    {
+      "feature": "TGS2600_ppm",
+      "importance": 0.0850370191223266
+    },
+    {
+      "feature": "TGS2610_rs_r0_ratio",
+      "importance": 0.07911477056676583
+    },
+    {
+      "feature": "TGS2610_compensated_resistance",
+      "importance": 0.062374730316345696
+    },
+    {
+      "feature": "TGS2610_resistance",
+      "importance": 0.05815015488017507
+    },
+    {
+      "feature": "TGS2602_rs_r0_ratio",
+      "importance": 0.053944861681984
+    },
+    {
+      "feature": "TGS2602_ppm",
+      "importance": 0.04849147504105471
+    },
+    {
+      "feature": "TGS2602_compensated_resistance",
+      "importance": 0.042059919637581225
+    },
+    {
+      "feature": "TGS2610_voltage",
+      "importance": 0.04071298567095259
+    },
+    {
+      "feature": "TGS2602_resistance",
+      "importance": 0.040328049463905676
+    },
+    {
+      "feature": "TGS2602_voltage",
+      "importance": 0.03543071088105967
+    },
+    {
+      "feature": "TGS2610_ppm",
+      "importance": 0.006994740795372044
+    },
+    {
+      "feature": "temperature",
+      "importance": 0.0
+    },
+    {
+      "feature": "humidity",
+      "importance": 0.0
+    }
+  ],
+  "training_samples": 350,
+  "test_samples": 88,
+  "classes": [
+    "alcohol",
+    "dexlite",
+    "pertalite"
+  ],
+  "model_type": "enhanced_hybrid_datasheet"
+}
