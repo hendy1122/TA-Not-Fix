@@ -1,0 +1,12 @@
+def is_daily_check_needed(self):
+    """Check jika daily drift check perlu dilakukan"""
+    if not self.daily_check_done:
+        return True
+
+    # Check if it's a new day
+    if hasattr(self, 'last_check_date'):
+        today = datetime.now().date()
+        if today != self.last_check_date:
+            return True
+
+    return False
