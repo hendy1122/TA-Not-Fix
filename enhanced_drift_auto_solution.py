@@ -1,0 +1,1835 @@
+#!/usr/bin/env python3
+"""
+Enhanced Gas Sensor Array System - SMART AUTO DRIFT SOLUTION
+Versi final dengan solusi lengkap untuk baseline 1.6V:
+1. Toleransi drift tepat untuk 1.6V
+2. Auto baseline normalization 
+3. Model compatibility tanpa retrain
+4. Smart compensation tanpa hardware adjustment
+"""
+
+import time
+import csv
+import json
+import numpy as np
+import pandas as pd
+from datetime import datetime
+import threading
+import queue
+import logging
+import math
+from pathlib import Path
+
+# Library untuk ADC dan GPIO
+try:
+    import board
+    import busio
+    import adafruit_ads1x15.ads1115 as ADS
+    from adafruit_ads1x15.analog_in import AnalogIn
+except ImportError:
+    print("Installing required libraries...")
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "adafruit-circuitpython-ads1x15"])
+    import board
+    import busio
+    import adafruit_ads1x15.ads1115 as ADS
+    from adafruit_ads1x15.analog_in import AnalogIn
+
+# Machine Learning libraries
+try:
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import classification_report, accuracy_score
+    from sklearn.preprocessing import StandardScaler
+    import joblib
+except ImportError:
+    print("Installing scikit-learn...")
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "scikit-learn"])
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import classification_report, accuracy_score
+    from sklearn.preprocessing import StandardScaler
+    import joblib
+
+class SmartDriftManager:
+    """Smart Drift Manager - Solusi lengkap untuk 1.6V baseline"""
+    
+    def __init__(self, logger):
+        self.logger = logger
+        self.baseline_history = {}
+        self.drift_compensation_factors = {}
+        self.last_calibration_time = None
+        self.daily_check_done = False
+        
+        # TOLERANSI YANG TEPAT UNTUK BASELINE 1.6V (mV based, bukan %)
+        self.drift_tolerance = {
+            'excellent': 0.020,    # ±20mV - sangat stabil
+            'good': 0.050,        # ±50mV - stabil, tidak perlu kompensasi
+            'moderate': 0.100,    # ±100mV - kompensasi ringan
+            'high': 0.200,        # ±200mV - kompensasi kuat
+            'extreme': 0.300      # ±300mV - auto reset baseline
+        }
+        
+        # BASELINE NORMALIZATION untuk model compatibility
+        self.original_baseline = {
+            'TGS2600': 1.6,
+            'TGS2602': 1.6,
+            'TGS2610': 1.6
+        }
+        
+        self.current_baseline = {
+            'TGS2600': 1.6,
+            'TGS2602': 1.6,
+            'TGS2610': 1.6
+        }
+        
+        self.normalization_factors = {
+            'TGS2600': 1.0,
+            'TGS2602': 1.0,
+            'TGS2610': 1.0
+        }
+        
+        self.load_drift_data()
+        
+    def is_daily_check_needed(self):
+        """Check jika daily drift check perlu dilakukan"""
+        if not self.daily_check_done:
+            return True
+            
+        if hasattr(self, 'last_check_date'):
+            today = datetime.now().date()
+            if today != self.last_check_date:
+                return True
+                
+        return False
+        
+    def smart_drift_check(self, sensor_array):
+        """SMART drift check dengan toleransi 1.6V yang tepat"""
+        self.logger.info("🧠 Smart drift check untuk baseline 1.6V...")
+        
+        print("\n" + "="*70)
+        print("🧠 SMART DRIFT CHECK - OPTIMIZED FOR 1.6V BASELINE")
+        print("Menggunakan toleransi mV (bukan %) yang tepat untuk baseline Anda")
+        print("="*70)
+        
+        response = input("Pastikan sensor di CLEAN AIR dan stabil. Continue? (y/n): ").lower()
+        if response != 'y':
+            print("❌ Smart drift check cancelled")
+            return False
+            
+        current_readings = self.measure_clean_air_baseline(sensor_array, duration=90)
+        
+        drift_detected = False
+        compensation_applied = False
+        baseline_reset_needed = False
+        
+        print("\n📊 SMART DRIFT ANALYSIS:")
+        print("-" * 70)
+        
+        for sensor_name, current_voltage in current_readings.items():
+            
+            if sensor_name in self.baseline_history and self.baseline_history[sensor_name]:
+                previous_voltage = self.baseline_history[sensor_name][-1]
+                voltage_drift = current_voltage - previous_voltage
+                voltage_diff_abs = abs(voltage_drift)
+                drift_mv = voltage_diff_abs * 1000  # Convert to mV
+                
+                print(f"\n{sensor_name}:")
+                print(f"  Previous Baseline: {previous_voltage:.3f}V")
+                print(f"  Current Reading:   {current_voltage:.3f}V") 
+                print(f"  Drift Amount:      {drift_mv:.0f}mV ({voltage_drift:+.3f}V)")
+                
+                # EVALUASI BERDASARKAN TOLERANSI mV (BUKAN %)
+                if voltage_diff_abs <= self.drift_tolerance['excellent']:
+                    print(f"  Status: ✅ EXCELLENT - Drift {drift_mv:.0f}mV (<20mV)")
+                    action = "No action needed - very stable"
+                    if sensor_name in self.drift_compensation_factors:
+                        del self.drift_compensation_factors[sensor_name]
+                        
+                elif voltage_diff_abs <= self.drift_tolerance['good']:
+                    print(f"  Status: ✅ GOOD - Drift {drift_mv:.0f}mV (<50mV)")
+                    action = "Stable, no compensation needed"
+                    if sensor_name in self.drift_compensation_factors:
+                        del self.drift_compensation_factors[sensor_name]
+                        
+                elif voltage_diff_abs <= self.drift_tolerance['moderate']:
+                    print(f"  Status: 🔧 MODERATE - Drift {drift_mv:.0f}mV (50-100mV)")
+                    compensation_factor = previous_voltage / current_voltage
+                    self.drift_compensation_factors[sensor_name] = compensation_factor
+                    compensation_applied = True
+                    action = f"Light compensation applied (factor: {compensation_factor:.3f})"
+                    
+                elif voltage_diff_abs <= self.drift_tolerance['high']:
+                    print(f"  Status: ⚠️  HIGH DRIFT - {drift_mv:.0f}mV (100-200mV)")
+                    compensation_factor = previous_voltage / current_voltage
+                    self.drift_compensation_factors[sensor_name] = compensation_factor
+                    compensation_applied = True
+                    drift_detected = True
+                    action = f"Strong compensation applied (factor: {compensation_factor:.3f})"
+                    
+                else:  # extreme drift
+                    print(f"  Status: ❌ EXTREME DRIFT - {drift_mv:.0f}mV (>200mV)")
+                    action = "⚡ AUTO BASELINE RESET recommended (Option 15)"
+                    baseline_reset_needed = True
+                    drift_detected = True
+                
+                print(f"  Action: {action}")
+                
+                # UPDATE NORMALIZATION FACTORS untuk model compatibility
+                self.current_baseline[sensor_name] = current_voltage
+                self.normalization_factors[sensor_name] = self.original_baseline[sensor_name] / current_voltage
+                
+            else:
+                print(f"\n{sensor_name}: Establishing baseline at {current_voltage:.3f}V")
+                self.current_baseline[sensor_name] = current_voltage
+                self.normalization_factors[sensor_name] = self.original_baseline[sensor_name] / current_voltage
+        
+        # Update baseline history
+        for sensor_name, voltage in current_readings.items():
+            if sensor_name not in self.baseline_history:
+                self.baseline_history[sensor_name] = []
+            
+            self.baseline_history[sensor_name].append(voltage)
+            
+            if len(self.baseline_history[sensor_name]) > 30:
+                self.baseline_history[sensor_name].pop(0)
+        
+        self.daily_check_done = True
+        self.last_check_date = datetime.now().date()
+        self.save_drift_data()
+        
+        # SMART SUMMARY
+        print("\n" + "="*70)
+        print("🧠 SMART DRIFT SUMMARY")
+        print("="*70)
+        
+        if baseline_reset_needed:
+            print("⚡ EXTREME DRIFT DETECTED")
+            print("   Recommendation: Use AUTO BASELINE RESET (Option 15)")
+            print("   ✅ No hardware adjustment needed")
+            print("   ✅ Model compatibility preserved")
+            
+        elif compensation_applied:
+            print("✅ SMART COMPENSATION APPLIED")
+            print("   ✅ Drift automatically compensated")
+            print("   ✅ Model compatibility preserved")
+            print("   ✅ No need to collect new data or retrain")
+            
+        elif drift_detected:
+            print("⚠️  MODERATE DRIFT DETECTED") 
+            print("   System compensated, monitor performance")
+            
+        else:
+            print("✅ ALL SENSORS STABLE")
+            print("   Your 1.6V baseline working perfectly")
+        
+        # Model compatibility check
+        print(f"\n🎯 MODEL COMPATIBILITY STATUS:")
+        all_factors_good = True
+        for sensor, factor in self.normalization_factors.items():
+            factor_percent = abs(1 - factor) * 100
+            if factor_percent > 20:
+                all_factors_good = False
+            status = "✅ GOOD" if factor_percent < 15 else "⚠️ MODERATE" if factor_percent < 25 else "❌ POOR"
+            print(f"   {sensor}: {factor_percent:.1f}% normalization - {status}")
+            
+        if all_factors_good:
+            print("\n✅ EXCELLENT: Model will work with existing training data")
+            print("✅ No need to collect new data or retrain model")
+        else:
+            print("\n⚠️  RECOMMENDATION: Consider baseline reset for optimal model performance")
+            
+        return drift_detected
+        
+    def auto_baseline_reset(self, sensor_array):
+        """Auto reset baseline tanpa hardware adjustment - SOLUSI TERBAIK"""
+        print("\n" + "="*70)
+        print("⚡ AUTO BASELINE RESET - SMART SOLUTION")
+        print("="*70)
+        print("This will:")
+        print("✅ Accept current voltages as new baseline")
+        print("✅ Reset drift compensation to zero") 
+        print("✅ Preserve model compatibility")
+        print("✅ No hardware adjustment needed")
+        print("✅ No new training data needed")
+        
+        confirm = input("\nProceed with auto baseline reset? (y/n): ").lower()
+        if confirm != 'y':
+            print("❌ Auto baseline reset cancelled")
+            return False
+            
+        print("\n🔄 Measuring new baseline...")
+        new_baseline = self.measure_clean_air_baseline(sensor_array, duration=60)
+        
+        print("\n📊 BASELINE UPDATE RESULTS:")
+        print("-" * 50)
+        
+        total_change = 0
+        for sensor_name, new_voltage in new_baseline.items():
+            old_voltage = self.current_baseline.get(sensor_name, 1.6)
+            change = new_voltage - old_voltage
+            change_mv = change * 1000
+            total_change += abs(change)
+            
+            print(f"{sensor_name}:")
+            print(f"  Old Baseline: {old_voltage:.3f}V")
+            print(f"  New Baseline: {new_voltage:.3f}V")
+            print(f"  Change: {change:+.3f}V ({change_mv:+.0f}mV)")
+            
+            # Update all baselines
+            self.current_baseline[sensor_name] = new_voltage
+            self.original_baseline[sensor_name] = new_voltage  # Update model reference
+            self.normalization_factors[sensor_name] = 1.0     # Reset normalization
+            
+            # Reset baseline history
+            self.baseline_history[sensor_name] = [new_voltage]
+        
+        # Reset all drift compensation
+        self.drift_compensation_factors = {}
+        self.daily_check_done = True
+        self.last_check_date = datetime.now().date()
+        
+        print(f"\n" + "="*50)
+        print("✅ AUTO BASELINE RESET COMPLETED!")
+        print("="*50)
+        print("✅ New baseline established")
+        print("✅ Drift compensation reset to zero")
+        print("✅ Model reference updated") 
+        print("✅ Normalization factors reset")
+        print("✅ System ready for normal operation")
+        print(f"✅ Total baseline change: {total_change*1000:.0f}mV")
+        
+        self.save_drift_data()
+        return True
+        
+    def apply_smart_compensation(self, sensor_name, raw_voltage):
+        """Apply smart compensation + normalization"""
+        # Step 1: Apply drift compensation
+        compensated_voltage = raw_voltage
+        if sensor_name in self.drift_compensation_factors:
+            compensated_voltage = raw_voltage * self.drift_compensation_factors[sensor_name]
+        
+        # Step 2: Apply normalization untuk model compatibility 
+        normalized_voltage = compensated_voltage * self.normalization_factors.get(sensor_name, 1.0)
+        
+        return normalized_voltage, compensated_voltage
+        
+    def get_smart_status(self):
+        """Get comprehensive smart drift status"""
+        status = {
+            'drift_compensation': {},
+            'baseline_normalization': {},
+            'overall_health': 'Unknown',
+            'model_compatible': True
+        }
+        
+        # Drift compensation status
+        for sensor_name, factor in self.drift_compensation_factors.items():
+            compensation_percent = abs(1 - factor) * 100
+            status['drift_compensation'][sensor_name] = {
+                'factor': factor,
+                'compensation_percent': compensation_percent,
+                'level': 'HIGH' if compensation_percent > 15 else 
+                        'MODERATE' if compensation_percent > 5 else 'LOW'
+            }
+        
+        # Baseline normalization status
+        model_compatible = True
+        for sensor_name, factor in self.normalization_factors.items():
+            normalization_percent = abs(1 - factor) * 100
+            sensor_compatible = normalization_percent < 25
+            if not sensor_compatible:
+                model_compatible = False
+                
+            status['baseline_normalization'][sensor_name] = {
+                'factor': factor,
+                'normalization_percent': normalization_percent,
+                'model_compatible': sensor_compatible
+            }
+        
+        status['model_compatible'] = model_compatible
+        
+        # Overall health assessment
+        avg_compensation = np.mean([abs(1-f)*100 for f in self.drift_compensation_factors.values()]) if self.drift_compensation_factors else 0
+        avg_normalization = np.mean([abs(1-f)*100 for f in self.normalization_factors.values()])
+        
+        if avg_compensation < 5 and avg_normalization < 10:
+            status['overall_health'] = 'EXCELLENT'
+        elif avg_compensation < 15 and avg_normalization < 20:
+            status['overall_health'] = 'GOOD'
+        elif avg_compensation < 25:
+            status['overall_health'] = 'MODERATE'
+        else:
+            status['overall_health'] = 'NEEDS_ATTENTION'
+            
+        return status
+        
+    def measure_clean_air_baseline(self, sensor_array, duration=90):
+        """Measure stable baseline voltage in clean air"""
+        self.logger.info(f"Measuring clean air baseline for {duration} seconds...")
+        
+        readings = {sensor: [] for sensor in sensor_array.sensor_config.keys()}
+        
+        start_time = time.time()
+        sample_count = 0
+        
+        print(f"📊 Collecting baseline data for {duration} seconds...")
+        
+        while time.time() - start_time < duration:
+            for sensor_name, config in sensor_array.sensor_config.items():
+                voltage = config['channel'].voltage
+                readings[sensor_name].append(voltage)
+            
+            sample_count += 1
+            remaining = int(duration - (time.time() - start_time))
+            
+            if sample_count % 15 == 0:
+                print(f"  📈 Progress: {remaining}s remaining (samples: {sample_count})")
+            
+            time.sleep(2)
+        
+        # Calculate stable baseline 
+        baseline = {}
+        
+        for sensor_name, voltages in readings.items():
+            voltages_array = np.array(voltages)
+            
+            # Remove outliers
+            mean_v = np.mean(voltages_array)
+            std_v = np.std(voltages_array)
+            
+            mask = np.abs(voltages_array - mean_v) <= 2 * std_v
+            filtered_voltages = voltages_array[mask]
+            
+            baseline_voltage = np.median(filtered_voltages)
+            stability = (std_v / mean_v) * 100
+            
+            baseline[sensor_name] = baseline_voltage
+            
+            self.logger.info(f"{sensor_name}: {baseline_voltage:.3f}V ± {std_v:.3f}V (stability: {stability:.1f}%)")
+        
+        return baseline
+        
+    def save_drift_data(self):
+        """Save comprehensive smart drift data"""
+        drift_data = {
+            'timestamp': datetime.now().isoformat(),
+            'version': 'smart_drift_v1.0',
+            'last_calibration_time': self.last_calibration_time.isoformat() if self.last_calibration_time else None,
+            'baseline_history': self.baseline_history,
+            'drift_compensation_factors': self.drift_compensation_factors,
+            'original_baseline': self.original_baseline,
+            'current_baseline': self.current_baseline,
+            'normalization_factors': self.normalization_factors,
+            'daily_check_done': self.daily_check_done,
+            'last_check_date': self.last_check_date.isoformat() if hasattr(self, 'last_check_date') else None
+        }
+        
+        try:
+            with open('smart_drift_data.json', 'w') as f:
+                json.dump(drift_data, f, indent=2)
+            self.logger.info("Smart drift data saved")
+        except Exception as e:
+            self.logger.error(f"Error saving drift data: {e}")
+            
+    def load_drift_data(self):
+        """Load smart drift data"""
+        try:
+            # Try smart drift data first
+            try:
+                with open('smart_drift_data.json', 'r') as f:
+                    drift_data = json.load(f)
+            except FileNotFoundError:
+                # Fallback to old drift data
+                try:
+                    with open('drift_compensation_data.json', 'r') as f:
+                        drift_data = json.load(f)
+                except FileNotFoundError:
+                    drift_data = {}
+            
+            self.baseline_history = drift_data.get('baseline_history', {})
+            self.drift_compensation_factors = drift_data.get('drift_compensation_factors', {})
+            self.original_baseline = drift_data.get('original_baseline', {'TGS2600': 1.6, 'TGS2602': 1.6, 'TGS2610': 1.6})
+            self.current_baseline = drift_data.get('current_baseline', {'TGS2600': 1.6, 'TGS2602': 1.6, 'TGS2610': 1.6})
+            self.normalization_factors = drift_data.get('normalization_factors', {'TGS2600': 1.0, 'TGS2602': 1.0, 'TGS2610': 1.0})
+            self.daily_check_done = drift_data.get('daily_check_done', False)
+            
+            if drift_data.get('last_calibration_time'):
+                self.last_calibration_time = datetime.fromisoformat(drift_data['last_calibration_time'])
+                
+            if drift_data.get('last_check_date'):
+                self.last_check_date = datetime.fromisoformat(drift_data['last_check_date']).date()
+                
+            self.logger.info("Smart drift data loaded successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error loading drift data: {e}")
+
+class EnhancedDatasheetGasSensorArray:
+    def __init__(self):
+        """Initialize enhanced gas sensor array system with Smart Drift Manager"""
+        # Setup logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler('gas_sensor.log'),
+                logging.StreamHandler()
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+
+        # Initialize I2C and ADC
+        try:
+            self.i2c = busio.I2C(board.SCL, board.SDA)
+            self.ads = ADS.ADS1115(self.i2c)
+
+            # Setup analog inputs for each sensor
+            self.tgs2600 = AnalogIn(self.ads, ADS.P0)  # Channel A0
+            self.tgs2602 = AnalogIn(self.ads, ADS.P1)  # Channel A1
+            self.tgs2610 = AnalogIn(self.ads, ADS.P2)  # Channel A2
+
+            self.logger.info("ADC ADS1115 initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize ADC: {e}")
+            raise
+
+        # Sensor configurations (same as original)
+        self.sensor_config = {
+            'TGS2600': {
+                'channel': self.tgs2600,
+                'target_gases': ['hydrogen', 'carbon_monoxide', 'alcohol'],
+                'detection_range': (1, 30),
+                'extended_range': (1, 500),
+                'heater_voltage': 5.0,
+                'heater_current': 42e-3,
+                'power_consumption': 210e-3,
+                'load_resistance': 10000,
+                'warmup_time': 7 * 24 * 3600,
+                'operating_temp_range': (-20, 50),
+                'optimal_temp': 20,
+                'optimal_humidity': 65,
+                'R0': None,
+                'baseline_voltage': None,
+                'sensitivity_ratios': {
+                    'hydrogen': (0.3, 0.6),
+                    'carbon_monoxide': (0.4, 0.7),
+                    'alcohol': (0.2, 0.5)
+                },
+                'use_extended_mode': False,
+                'concentration_threshold': 50,
+                'extended_sensitivity': 2.5
+            },
+            'TGS2602': {
+                'channel': self.tgs2602,
+                'target_gases': ['toluene', 'ammonia', 'h2s', 'alcohol'],
+                'detection_range': (1, 30),
+                'extended_range': (1, 300),
+                'heater_voltage': 5.0,
+                'heater_current': 56e-3,
+                'power_consumption': 280e-3,
+                'load_resistance': 10000,
+                'warmup_time': 7 * 24 * 3600,
+                'operating_temp_range': (-10, 60),
+                'optimal_temp': 20,
+                'optimal_humidity': 65,
+                'R0': None,
+                'baseline_voltage': None,
+                'sensitivity_ratios': {
+                    'alcohol': (0.08, 0.5),
+                    'toluene': (0.1, 0.4),
+                    'ammonia': (0.15, 0.6),
+                    'h2s': (0.05, 0.3)
+                },
+                'use_extended_mode': False,
+                'concentration_threshold': 40,
+                'extended_sensitivity': 3.0
+            },
+            'TGS2610': {
+                'channel': self.tgs2610,
+                'target_gases': ['butane', 'propane', 'lp_gas', 'iso_butane'],
+                'detection_range': (1, 25),
+                'extended_range': (1, 200),
+                'heater_voltage': 5.0,
+                'heater_current': 56e-3,
+                'power_consumption': 280e-3,
+                'load_resistance': 10000,
+                'warmup_time': 7 * 24 * 3600,
+                'operating_temp_range': (-10, 50),
+                'optimal_temp': 20,
+                'optimal_humidity': 65,
+                'R0': None,
+                'baseline_voltage': None,
+                'sensitivity_ratios': {
+                    'iso_butane': (0.45, 0.62),
+                    'butane': (0.4, 0.6),
+                    'propane': (0.35, 0.55),
+                    'lp_gas': (0.4, 0.6)
+                },
+                'use_extended_mode': False,
+                'concentration_threshold': 30,
+                'extended_sensitivity': 2.0
+            }
+        }
+
+        # Initialize SMART Drift Manager
+        self.drift_manager = SmartDriftManager(self.logger)
+
+        # Environmental compensation parameters
+        self.temp_compensation_enabled = True
+        self.humidity_compensation_enabled = True
+        self.current_temperature = 20.0
+        self.current_humidity = 65.0
+
+        # Data storage
+        self.data_queue = queue.Queue()
+        self.is_collecting = False
+        self.data_file = f"gas_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+        # Machine Learning components
+        self.model = None
+        self.scaler = StandardScaler()
+        self.is_model_trained = False
+
+        # Create data directory
+        Path("data").mkdir(exist_ok=True)
+        Path("models").mkdir(exist_ok=True)
+        Path("calibration").mkdir(exist_ok=True)
+
+        self.logger.info("Enhanced Gas Sensor Array System with Smart Drift Manager initialized")
+
+    def voltage_to_resistance(self, voltage, load_resistance=10000):
+        """Convert ADC voltage to sensor resistance"""
+        if voltage <= 0.001:
+            return float('inf')
+
+        circuit_voltage = 5.0
+
+        if voltage >= circuit_voltage:
+            return 0.1
+
+        sensor_resistance = load_resistance * (circuit_voltage - voltage) / voltage
+        return max(1, sensor_resistance)
+
+    def temperature_compensation(self, sensor_name, raw_value, temperature):
+        """Apply temperature compensation"""
+        if not self.temp_compensation_enabled:
+            return raw_value
+
+        temp_factors = {
+            'TGS2600': {
+                -20: 1.8, -10: 1.4, 0: 1.2, 10: 1.05, 20: 1.0,
+                30: 0.95, 40: 0.9, 50: 0.85
+            },
+            'TGS2602': {
+                -10: 1.5, 0: 1.3, 10: 1.1, 20: 1.0,
+                30: 0.9, 40: 0.85, 50: 0.8, 60: 0.75
+            },
+            'TGS2610': {
+                -10: 1.4, 0: 1.2, 10: 1.05, 20: 1.0,
+                30: 0.95, 40: 0.9, 50: 0.85
+            }
+        }
+
+        temp_curve = temp_factors.get(sensor_name, {20: 1.0})
+        temps = sorted(temp_curve.keys())
+
+        if temperature <= temps[0]:
+            factor = temp_curve[temps[0]]
+        elif temperature >= temps[-1]:
+            factor = temp_curve[temps[-1]]
+        else:
+            for i in range(len(temps) - 1):
+                if temps[i] <= temperature <= temps[i + 1]:
+                    t1, t2 = temps[i], temps[i + 1]
+                    f1, f2 = temp_curve[t1], temp_curve[t2]
+                    factor = f1 + (f2 - f1) * (temperature - t1) / (t2 - t1)
+                    break
+            else:
+                factor = 1.0
+
+        return raw_value * factor
+
+    def humidity_compensation(self, sensor_name, raw_value, humidity):
+        """Apply humidity compensation"""
+        if not self.humidity_compensation_enabled:
+            return raw_value
+
+        humidity_factors = {
+            'TGS2600': {35: 1.1, 65: 1.0, 95: 0.9},
+            'TGS2602': {40: 1.05, 65: 1.0, 85: 0.95, 100: 0.9},
+            'TGS2610': {40: 1.1, 65: 1.0, 85: 0.95}
+        }
+
+        humidity_curve = humidity_factors.get(sensor_name, {65: 1.0})
+        humidities = sorted(humidity_curve.keys())
+
+        if humidity <= humidities[0]:
+            factor = humidity_curve[humidities[0]]
+        elif humidity >= humidities[-1]:
+            factor = humidity_curve[humidities[-1]]
+        else:
+            for i in range(len(humidities) - 1):
+                if humidities[i] <= humidity <= humidities[i + 1]:
+                    h1, h2 = humidities[i], humidities[i + 1]
+                    f1, f2 = humidity_curve[h1], humidity_curve[h2]
+                    factor = f1 + (f2 - f1) * (humidity - h1) / (h2 - h1)
+                    break
+            else:
+                factor = 1.0
+
+        return raw_value * factor
+
+    def resistance_to_ppm(self, sensor_name, resistance, gas_type='auto'):
+        """Convert resistance to PPM"""
+        config = self.sensor_config[sensor_name]
+        R0 = config.get('R0')
+
+        if R0 is None or R0 == 0:
+            return self.simplified_ppm_calculation(sensor_name, resistance)
+
+        rs_r0_ratio = resistance / R0
+
+        if config['use_extended_mode']:
+            return self.extended_ppm_calculation(sensor_name, rs_r0_ratio, gas_type)
+        else:
+            return self.datasheet_ppm_calculation(sensor_name, rs_r0_ratio, gas_type)
+
+    def datasheet_ppm_calculation(self, sensor_name, rs_r0_ratio, gas_type):
+        """Datasheet PPM calculation"""
+        if sensor_name == 'TGS2600':
+            if gas_type == 'hydrogen' or gas_type == 'auto':
+                if rs_r0_ratio < 0.3:
+                    ppm = 30
+                elif rs_r0_ratio > 0.9:
+                    ppm = 0
+                else:
+                    ppm = 50 * ((0.6 / rs_r0_ratio) ** 2.5)
+                    ppm = min(ppm, 30)
+            elif gas_type == 'alcohol':
+                if rs_r0_ratio < 0.2:
+                    ppm = 30
+                elif rs_r0_ratio > 0.8:
+                    ppm = 0
+                else:
+                    ppm = 40 * ((0.4 / rs_r0_ratio) ** 2.0)
+                    ppm = min(ppm, 30)
+            else:
+                ppm = 30 * ((0.5 / rs_r0_ratio) ** 2.0)
+                ppm = min(ppm, 30)
+
+        elif sensor_name == 'TGS2602':
+            if gas_type == 'alcohol' or gas_type == 'auto':
+                if rs_r0_ratio < 0.08:
+                    ppm = 30
+                elif rs_r0_ratio > 0.9:
+                    ppm = 0
+                else:
+                    ppm = 25 * ((0.25 / rs_r0_ratio) ** 1.8)
+                    ppm = min(ppm, 30)
+            elif gas_type == 'toluene':
+                ppm = 25 * ((0.2 / rs_r0_ratio) ** 1.5)
+                ppm = min(ppm, 30)
+            else:
+                ppm = 20 * ((0.3 / rs_r0_ratio) ** 1.6)
+                ppm = min(ppm, 30)
+
+        elif sensor_name == 'TGS2610':
+            if rs_r0_ratio < 0.45:
+                ppm = 25
+            elif rs_r0_ratio > 0.95:
+                ppm = 0
+            else:
+                ppm = 30 * ((0.6 / rs_r0_ratio) ** 1.2)
+                ppm = min(ppm, 25)
+        else:
+            ppm = 0
+
+        return max(0, ppm)
+
+    def extended_ppm_calculation(self, sensor_name, rs_r0_ratio, gas_type):
+        """Extended PPM calculation"""
+        config = self.sensor_config[sensor_name]
+        sensitivity = config['extended_sensitivity']
+
+        if rs_r0_ratio >= 1.0:
+            return 0
+
+        if sensor_name == 'TGS2600':
+            if rs_r0_ratio < 0.05:
+                base_ppm = 200 + (0.05 - rs_r0_ratio) * 1000
+            elif rs_r0_ratio < 0.2:
+                base_ppm = 100 + (0.2 - rs_r0_ratio) * 500
+            else:
+                base_ppm = 60 * ((0.6 / rs_r0_ratio) ** sensitivity)
+
+        elif sensor_name == 'TGS2602':
+            if rs_r0_ratio < 0.02:
+                base_ppm = 150 + (0.02 - rs_r0_ratio) * 2000
+            elif rs_r0_ratio < 0.1:
+                base_ppm = 75 + (0.1 - rs_r0_ratio) * 800
+            else:
+                base_ppm = 50 * ((0.3 / rs_r0_ratio) ** sensitivity)
+
+        elif sensor_name == 'TGS2610':
+            if rs_r0_ratio < 0.1:
+                base_ppm = 100 + (0.1 - rs_r0_ratio) * 1500
+            elif rs_r0_ratio < 0.3:
+                base_ppm = 50 + (0.3 - rs_r0_ratio) * 400
+            else:
+                base_ppm = 40 * ((0.7 / rs_r0_ratio) ** sensitivity)
+        else:
+            base_ppm = 0
+
+        gas_multipliers = {
+            'alcohol': 1.0,
+            'pertalite': 1.3,
+            'pertamax': 1.6,
+            'dexlite': 1.9,
+            'biosolar': 2.2,
+            'hydrogen': 0.8,
+            'toluene': 1.1,
+            'ammonia': 0.9,
+            'butane': 1.2,
+            'propane': 1.4,
+            'normal': 0.7
+        }
+
+        multiplier = gas_multipliers.get(gas_type, 1.0)
+        return base_ppm * multiplier
+
+    def simplified_ppm_calculation(self, sensor_name, resistance):
+        """Simplified PPM calculation"""
+        config = self.sensor_config[sensor_name]
+        baseline_voltage = config.get('baseline_voltage', 0.4)
+
+        baseline_resistance = self.voltage_to_resistance(baseline_voltage)
+
+        if resistance >= baseline_resistance:
+            return 0
+
+        ratio = baseline_resistance / resistance
+
+        if config['use_extended_mode']:
+            max_range = config['extended_range'][1]
+            ppm = max_range * (ratio - 1) * 0.4
+        else:
+            max_range = config['detection_range'][1]
+            ppm = max_range * (ratio - 1) * 0.5
+
+        return max(0, ppm)
+
+    def set_sensor_mode(self, mode='datasheet'):
+        """Set calculation mode for all sensors"""
+        use_extended = (mode == 'extended')
+
+        for sensor_name in self.sensor_config.keys():
+            self.sensor_config[sensor_name]['use_extended_mode'] = use_extended
+
+        mode_name = "Extended (Training)" if use_extended else "Datasheet (Accurate)"
+        self.logger.info(f"Sensor calculation mode set to: {mode_name}")
+
+    def read_sensors(self):
+        """Enhanced sensor reading with SMART drift compensation"""
+        readings = {}
+
+        for sensor_name, config in self.sensor_config.items():
+            try:
+                # Read raw voltage
+                raw_voltage = config['channel'].voltage
+                
+                # Apply SMART drift compensation + normalization
+                normalized_voltage, compensated_voltage = self.drift_manager.apply_smart_compensation(sensor_name, raw_voltage)
+
+                # Convert to resistance using compensated voltage
+                resistance = self.voltage_to_resistance(compensated_voltage, config['load_resistance'])
+
+                # Apply environmental compensation
+                compensated_resistance = self.temperature_compensation(
+                    sensor_name, resistance, self.current_temperature)
+                compensated_resistance = self.humidity_compensation(
+                    sensor_name, compensated_resistance, self.current_humidity)
+
+                # Calculate Rs/R0 ratio
+                R0 = config.get('R0')
+                rs_r0_ratio = compensated_resistance / R0 if R0 else None
+
+                # Convert to PPM
+                ppm = self.resistance_to_ppm(sensor_name, compensated_resistance)
+
+                # Current mode info
+                current_mode = "Extended" if config['use_extended_mode'] else "Datasheet"
+
+                # Smart drift info
+                drift_factor = self.drift_manager.drift_compensation_factors.get(sensor_name, 1.0)
+                normalization_factor = self.drift_manager.normalization_factors.get(sensor_name, 1.0)
+                smart_compensation_applied = abs(1 - drift_factor) > 0.01 or abs(1 - normalization_factor) > 0.01
+
+                readings[sensor_name] = {
+                    'voltage': normalized_voltage,  # For model compatibility
+                    'raw_voltage': raw_voltage,
+                    'compensated_voltage': compensated_voltage,
+                    'resistance': resistance,
+                    'compensated_resistance': compensated_resistance,
+                    'rs_r0_ratio': rs_r0_ratio,
+                    'ppm': ppm,
+                    'R0': R0,
+                    'mode': current_mode,
+                    'target_gases': config['target_gases'],
+                    'smart_compensation_applied': smart_compensation_applied,
+                    'drift_factor': drift_factor,
+                    'normalization_factor': normalization_factor
+                }
+
+            except Exception as e:
+                self.logger.error(f"Error reading {sensor_name}: {e}")
+                readings[sensor_name] = {
+                    'voltage': 0, 'raw_voltage': 0, 'compensated_voltage': 0, 'resistance': 0, 'compensated_resistance': 0,
+                    'rs_r0_ratio': None, 'ppm': 0, 'R0': None, 'mode': 'Error',
+                    'target_gases': [], 'smart_compensation_applied': False, 'drift_factor': 1.0, 'normalization_factor': 1.0
+                }
+
+        return readings
+
+    def calibrate_sensors(self, duration=300):
+        """Enhanced calibration with Smart Drift Manager"""
+        self.logger.info(f"Starting enhanced sensor calibration for {duration} seconds...")
+        self.logger.info("Ensure sensors are in CLEAN AIR environment!")
+        self.logger.info("Sensors should be warmed up for at least 10 minutes")
+
+        input("Press Enter when sensors are in clean air and warmed up...")
+
+        readings = {sensor: {'voltages': [], 'resistances': []}
+                   for sensor in self.sensor_config.keys()}
+
+        start_time = time.time()
+        sample_count = 0
+
+        while time.time() - start_time < duration:
+            for sensor_name, config in self.sensor_config.items():
+                # Use raw voltage for calibration
+                voltage = config['channel'].voltage
+                resistance = self.voltage_to_resistance(voltage, config['load_resistance'])
+
+                # Apply environmental compensation
+                resistance = self.temperature_compensation(sensor_name, resistance, self.current_temperature)
+                resistance = self.humidity_compensation(sensor_name, resistance, self.current_humidity)
+
+                readings[sensor_name]['voltages'].append(voltage)
+                readings[sensor_name]['resistances'].append(resistance)
+
+            sample_count += 1
+            time.sleep(2)
+
+            remaining = int(duration - (time.time() - start_time))
+            if remaining % 30 == 0 and remaining > 0:
+                print(f"Calibration remaining: {remaining} seconds (Samples: {sample_count})")
+
+        # Calculate calibration parameters
+        calibration_results = {}
+
+        for sensor_name in self.sensor_config.keys():
+            voltages = readings[sensor_name]['voltages']
+            resistances = readings[sensor_name]['resistances']
+
+            voltage_mean = np.mean(voltages)
+            voltage_std = np.std(voltages)
+            resistance_mean = np.mean(resistances)
+            resistance_std = np.std(resistances)
+
+            # Set R0 and baseline voltage
+            self.sensor_config[sensor_name]['R0'] = resistance_mean
+            self.sensor_config[sensor_name]['baseline_voltage'] = voltage_mean
+
+            calibration_results[sensor_name] = {
+                'R0': resistance_mean,
+                'R0_std': resistance_std,
+                'baseline_voltage': voltage_mean,
+                'voltage_std': voltage_std,
+                'sample_count': len(voltages),
+                'stability': (voltage_std / voltage_mean) * 100
+            }
+
+            self.logger.info(f"{sensor_name} Calibration:")
+            self.logger.info(f"  R0: {resistance_mean:.1f}Ω ± {resistance_std:.1f}Ω")
+            self.logger.info(f"  Baseline Voltage: {voltage_mean:.3f}V ± {voltage_std:.3f}V")
+            self.logger.info(f"  Stability: {calibration_results[sensor_name]['stability']:.2f}%")
+
+        # Update Smart Drift Manager
+        self.drift_manager.last_calibration_time = datetime.now()
+        
+        # Update baselines in drift manager
+        for sensor_name, results in calibration_results.items():
+            baseline_voltage = results['baseline_voltage']
+            self.drift_manager.current_baseline[sensor_name] = baseline_voltage
+            self.drift_manager.original_baseline[sensor_name] = baseline_voltage
+            self.drift_manager.normalization_factors[sensor_name] = 1.0
+            
+            # Initialize baseline history
+            if sensor_name not in self.drift_manager.baseline_history:
+                self.drift_manager.baseline_history[sensor_name] = []
+            self.drift_manager.baseline_history[sensor_name].append(baseline_voltage)
+        
+        # Reset drift compensation
+        self.drift_manager.drift_compensation_factors = {}
+        self.drift_manager.daily_check_done = False
+
+        # Save calibration data
+        calib_data = {
+            'timestamp': datetime.now().isoformat(),
+            'duration': duration,
+            'temperature': self.current_temperature,
+            'humidity': self.current_humidity,
+            'sensors': calibration_results
+        }
+
+        calib_file = f"calibration/calibration_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(calib_file, 'w') as f:
+            json.dump(calib_data, f, indent=2)
+
+        with open('sensor_calibration.json', 'w') as f:
+            json.dump(calib_data, f, indent=2)
+
+        # Save drift data
+        self.drift_manager.save_drift_data()
+
+        self.logger.info(f"Enhanced calibration completed and saved to {calib_file}")
+
+    def load_calibration(self):
+        """Load calibration data"""
+        try:
+            with open('sensor_calibration.json', 'r') as f:
+                calib_data = json.load(f)
+
+            for sensor_name, data in calib_data['sensors'].items():
+                if sensor_name in self.sensor_config:
+                    self.sensor_config[sensor_name]['R0'] = data['R0']
+                    self.sensor_config[sensor_name]['baseline_voltage'] = data['baseline_voltage']
+
+            if 'timestamp' in calib_data:
+                self.drift_manager.last_calibration_time = datetime.fromisoformat(calib_data['timestamp'])
+
+            self.logger.info("Enhanced calibration data loaded successfully")
+            self.logger.info(f"Calibration date: {calib_data.get('timestamp', 'Unknown')}")
+
+            return True
+        except FileNotFoundError:
+            self.logger.warning("No calibration file found. Please run calibration first.")
+            return False
+        except KeyError as e:
+            self.logger.error(f"Invalid calibration file format: {e}")
+            return False
+
+    def collect_training_data(self, gas_type, duration=60, samples_per_second=1):
+        """Enhanced training data collection"""
+        self.set_sensor_mode('extended')
+
+        self.logger.info(f"Collecting enhanced training data for {gas_type} in EXTENDED mode with Smart Drift compensation")
+        self.logger.info(f"Duration: {duration}s, Sampling rate: {samples_per_second} Hz")
+
+        valid_gases = ['normal', 'alcohol', 'pertalite', 'pertamax', 'dexlite', 'biosolar',
+                      'hydrogen', 'toluene', 'ammonia', 'butane', 'propane']
+        if gas_type not in valid_gases:
+            self.logger.error(f"Invalid gas type. Valid options: {valid_gases}")
+            return None
+
+        if gas_type == 'normal':
+            input(f"Ensure sensors are in CLEAN AIR (no gas). Press Enter to start...")
+            self.logger.info("Collecting NORMAL/CLEAN AIR data...")
+        else:
+            input(f"Prepare to spray {gas_type}. Press Enter to start data collection...")
+
+        training_data = []
+        start_time = time.time()
+        sample_interval = 1.0 / samples_per_second
+
+        baseline_readings = self.read_sensors()
+        self.logger.info("Baseline readings recorded")
+
+        while time.time() - start_time < duration:
+            timestamp = datetime.now()
+            readings = self.read_sensors()
+
+            # Enhanced data row with smart features
+            data_row = {
+                'timestamp': timestamp,
+                'gas_type': gas_type,
+                'temperature': self.current_temperature,
+                'humidity': self.current_humidity,
+
+                # TGS2600 data with smart compensation
+                'TGS2600_voltage': readings['TGS2600']['voltage'],
+                'TGS2600_raw_voltage': readings['TGS2600']['raw_voltage'],
+                'TGS2600_compensated_voltage': readings['TGS2600']['compensated_voltage'],
+                'TGS2600_resistance': readings['TGS2600']['resistance'],
+                'TGS2600_compensated_resistance': readings['TGS2600']['compensated_resistance'],
+                'TGS2600_rs_r0_ratio': readings['TGS2600']['rs_r0_ratio'],
+                'TGS2600_ppm': readings['TGS2600']['ppm'],
+                'TGS2600_drift_factor': readings['TGS2600']['drift_factor'],
+                'TGS2600_normalization_factor': readings['TGS2600']['normalization_factor'],
+
+                # TGS2602 data with smart compensation
+                'TGS2602_voltage': readings['TGS2602']['voltage'],
+                'TGS2602_raw_voltage': readings['TGS2602']['raw_voltage'],
+                'TGS2602_compensated_voltage': readings['TGS2602']['compensated_voltage'],
+                'TGS2602_resistance': readings['TGS2602']['resistance'],
+                'TGS2602_compensated_resistance': readings['TGS2602']['compensated_resistance'],
+                'TGS2602_rs_r0_ratio': readings['TGS2602']['rs_r0_ratio'],
+                'TGS2602_ppm': readings['TGS2602']['ppm'],
+                'TGS2602_drift_factor': readings['TGS2602']['drift_factor'],
+                'TGS2602_normalization_factor': readings['TGS2602']['normalization_factor'],
+
+                # TGS2610 data with smart compensation
+                'TGS2610_voltage': readings['TGS2610']['voltage'],
+                'TGS2610_raw_voltage': readings['TGS2610']['raw_voltage'],
+                'TGS2610_compensated_voltage': readings['TGS2610']['compensated_voltage'],
+                'TGS2610_resistance': readings['TGS2610']['resistance'],
+                'TGS2610_compensated_resistance': readings['TGS2610']['compensated_resistance'],
+                'TGS2610_rs_r0_ratio': readings['TGS2610']['rs_r0_ratio'],
+                'TGS2610_ppm': readings['TGS2610']['ppm'],
+                'TGS2610_drift_factor': readings['TGS2610']['drift_factor'],
+                'TGS2610_normalization_factor': readings['TGS2610']['normalization_factor']
+            }
+
+            training_data.append(data_row)
+
+            # Enhanced display with smart status
+            elapsed = time.time() - start_time
+            remaining = duration - elapsed
+            status = "CLEAN AIR" if gas_type == 'normal' else gas_type.upper()
+            
+            smart_status = "SMART_COMP" if any(readings[s]['smart_compensation_applied'] for s in readings.keys()) else "RAW"
+            
+            print(f"\rTime: {remaining:.1f}s | Status: {status} | Mode: {smart_status} | "
+                  f"2600: {readings['TGS2600']['ppm']:.0f}ppm ({readings['TGS2600']['mode']}) | "
+                  f"2602: {readings['TGS2602']['ppm']:.0f}ppm ({readings['TGS2602']['mode']}) | "
+                  f"2610: {readings['TGS2610']['ppm']:.0f}ppm ({readings['TGS2610']['mode']})", end="")
+
+            time.sleep(sample_interval)
+
+        print()
+
+        # Save training data
+        filename = f"data/training_{gas_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        df = pd.DataFrame(training_data)
+        df.to_csv(filename, index=False)
+
+        self.analyze_training_data_quality(df, gas_type)
+
+        self.logger.info(f"Smart training data saved to {filename}")
+        self.logger.info(f"Collected {len(training_data)} samples for {gas_type}")
+
+        return training_data
+
+    def analyze_training_data_quality(self, df, gas_type):
+        """Analyze training data quality"""
+        self.logger.info(f"Enhanced analysis for {gas_type}:")
+
+        for sensor in ['TGS2600', 'TGS2602', 'TGS2610']:
+            ppm_col = f'{sensor}_ppm'
+            ratio_col = f'{sensor}_rs_r0_ratio'
+
+            if ppm_col in df.columns:
+                ppm_data = df[ppm_col]
+                ppm_mean = ppm_data.mean()
+                ppm_std = ppm_data.std()
+                ppm_max = ppm_data.max()
+                ppm_min = ppm_data.min()
+
+                self.logger.info(f"  {sensor}: PPM {ppm_mean:.0f}±{ppm_std:.0f} (range: {ppm_min:.0f}-{ppm_max:.0f})")
+
+                if gas_type == 'normal':
+                    if ppm_max < 30:
+                        self.logger.info(f"  ✅ {sensor}: Good normal baseline")
+                    if ppm_std / ppm_mean < 0.5:
+                        self.logger.info(f"  ✅ {sensor}: Stable normal readings")
+                else:
+                    if ppm_max > 100:
+                        self.logger.info(f"  ✅ {sensor}: Good high-concentration response")
+                    if (ppm_max - ppm_min) > 50:
+                        self.logger.info(f"  ✅ {sensor}: Excellent dynamic range")
+                    if ppm_std / ppm_mean < 0.3:
+                        self.logger.info(f"  ✅ {sensor}: Stable readings")
+
+    def train_model(self):
+        """Enhanced machine learning model training"""
+        self.logger.info("Training enhanced machine learning model with Smart Drift features...")
+
+        training_data = self.load_training_data()
+        if training_data is None:
+            return False
+
+        # Enhanced feature selection including smart compensation features
+        feature_columns = [
+            'TGS2600_voltage', 'TGS2600_resistance', 'TGS2600_compensated_resistance',
+            'TGS2600_rs_r0_ratio', 'TGS2600_ppm', 'TGS2600_drift_factor', 'TGS2600_normalization_factor',
+            'TGS2602_voltage', 'TGS2602_resistance', 'TGS2602_compensated_resistance',
+            'TGS2602_rs_r0_ratio', 'TGS2602_ppm', 'TGS2602_drift_factor', 'TGS2602_normalization_factor',
+            'TGS2610_voltage', 'TGS2610_resistance', 'TGS2610_compensated_resistance',
+            'TGS2610_rs_r0_ratio', 'TGS2610_ppm', 'TGS2610_drift_factor', 'TGS2610_normalization_factor',
+            'temperature', 'humidity'
+        ]
+
+        available_columns = [col for col in feature_columns if col in training_data.columns]
+        
+        # Add default values for missing smart compensation features
+        for sensor in ['TGS2600', 'TGS2602', 'TGS2610']:
+            drift_col = f'{sensor}_drift_factor'
+            norm_col = f'{sensor}_normalization_factor'
+            if drift_col not in training_data.columns:
+                training_data[drift_col] = 1.0
+                if drift_col in feature_columns:
+                    available_columns.append(drift_col)
+            if norm_col not in training_data.columns:
+                training_data[norm_col] = 1.0
+                if norm_col in feature_columns:
+                    available_columns.append(norm_col)
+
+        X = training_data[available_columns].values
+        y = training_data['gas_type'].values
+
+        X = np.nan_to_num(X, nan=0.0)
+
+        unique_classes, class_counts = np.unique(y, return_counts=True)
+        self.logger.info(f"Training classes: {list(unique_classes)}")
+        for cls, count in zip(unique_classes, class_counts):
+            self.logger.info(f"  {cls}: {count} samples")
+
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+
+        self.model = RandomForestClassifier(
+            n_estimators=150,
+            max_depth=12,
+            min_samples_split=8,
+            min_samples_leaf=3,
+            random_state=42,
+            class_weight='balanced'
+        )
+
+        self.model.fit(X_train_scaled, y_train)
+
+        y_pred = self.model.predict(X_test_scaled)
+        accuracy = accuracy_score(y_test, y_pred)
+
+        feature_importance = pd.DataFrame({
+            'feature': available_columns,
+            'importance': self.model.feature_importances_
+        }).sort_values('importance', ascending=False)
+
+        self.logger.info(f"Model accuracy: {accuracy:.3f}")
+        self.logger.info("\nTop 5 Most Important Features:")
+        for _, row in feature_importance.head().iterrows():
+            self.logger.info(f"  {row['feature']}: {row['importance']:.3f}")
+
+        self.logger.info("\nClassification Report:")
+        self.logger.info(f"\n{classification_report(y_test, y_pred)}")
+
+        # Save model and metadata
+        model_metadata = {
+            'timestamp': datetime.now().isoformat(),
+            'accuracy': accuracy,
+            'feature_columns': available_columns,
+            'feature_importance': feature_importance.to_dict('records'),
+            'training_samples': len(X_train),
+            'test_samples': len(X_test),
+            'classes': list(unique_classes),
+            'model_type': 'smart_drift_compensation_v1.0',
+            'drift_compensation_enabled': True,
+            'baseline_normalization_enabled': True
+        }
+
+        joblib.dump(self.model, 'models/gas_classifier.pkl')
+        joblib.dump(self.scaler, 'models/scaler.pkl')
+
+        with open('models/model_metadata.json', 'w') as f:
+            json.dump(model_metadata, f, indent=2)
+
+        self.is_model_trained = True
+        self.logger.info("Smart drift compensation model trained and saved successfully")
+
+        return True
+
+    def load_training_data(self):
+        """Load and validate training data"""
+        data_files = list(Path("data").glob("training_*.csv"))
+        if not data_files:
+            self.logger.error("No training data files found!")
+            return None
+
+        all_data = []
+        gas_counts = {}
+
+        for file in data_files:
+            try:
+                df = pd.read_csv(file)
+                all_data.append(df)
+
+                if 'gas_type' in df.columns:
+                    gas_type = df['gas_type'].iloc[0]
+                    gas_counts[gas_type] = gas_counts.get(gas_type, 0) + len(df)
+
+                self.logger.info(f"Loaded {len(df)} samples from {file.name}")
+            except Exception as e:
+                self.logger.error(f"Error loading {file.name}: {e}")
+
+        if not all_data:
+            return None
+
+        combined_data = pd.concat(all_data, ignore_index=True)
+
+        self.logger.info(f"Total training samples: {len(combined_data)}")
+        self.logger.info("Samples per gas type:")
+        for gas, count in gas_counts.items():
+            self.logger.info(f"  {gas}: {count} samples")
+
+        return combined_data
+
+    def load_model(self):
+        """Load trained model"""
+        try:
+            self.model = joblib.load('models/gas_classifier.pkl')
+            self.scaler = joblib.load('models/scaler.pkl')
+            self.is_model_trained = True
+            self.logger.info("Enhanced model loaded successfully")
+            return True
+        except FileNotFoundError:
+            self.logger.error("No trained model found")
+            return False
+
+    def predict_gas(self, readings):
+        """Enhanced gas prediction with smart compensation"""
+        if not self.is_model_trained:
+            return "Unknown - Model not trained", 0.0
+
+        try:
+            with open('models/model_metadata.json', 'r') as f:
+                metadata = json.load(f)
+            feature_columns = metadata['feature_columns']
+        except:
+            feature_columns = ['TGS2600_voltage', 'TGS2600_ppm', 'TGS2602_voltage',
+                             'TGS2602_ppm', 'TGS2610_voltage', 'TGS2610_ppm']
+
+        feature_vector = []
+        for feature in feature_columns:
+            if feature == 'temperature':
+                feature_vector.append(self.current_temperature)
+            elif feature == 'humidity':
+                feature_vector.append(self.current_humidity)
+            else:
+                parts = feature.split('_')
+                sensor = parts[0]
+                measurement = '_'.join(parts[1:])
+
+                if sensor in readings and measurement in readings[sensor]:
+                    value = readings[sensor][measurement]
+                    feature_vector.append(value if value is not None else 0.0)
+                else:
+                    if measurement in ['drift_factor', 'normalization_factor']:
+                        feature_vector.append(1.0)
+                    else:
+                        feature_vector.append(0.0)
+
+        features = np.array([feature_vector])
+        features = np.nan_to_num(features, nan=0.0)
+
+        features_scaled = self.scaler.transform(features)
+        prediction = self.model.predict(features_scaled)[0]
+        probabilities = self.model.predict_proba(features_scaled)[0]
+        confidence = probabilities.max()
+
+        return prediction, confidence
+
+    def continuous_monitoring(self, duration=None, monitoring_mode='datasheet'):
+        """Enhanced continuous monitoring with Smart Drift compensation"""
+        self.set_sensor_mode(monitoring_mode)
+
+        self.logger.info(f"Starting enhanced monitoring in {monitoring_mode.upper()} mode with Smart Drift compensation...")
+        self.is_collecting = True
+
+        fieldnames = [
+            'timestamp', 'temperature', 'humidity', 'sensor_mode',
+            'TGS2600_voltage', 'TGS2600_raw_voltage', 'TGS2600_compensated_voltage', 'TGS2600_resistance', 'TGS2600_compensated_resistance',
+            'TGS2600_rs_r0_ratio', 'TGS2600_ppm', 'TGS2600_drift_factor', 'TGS2600_normalization_factor',
+            'TGS2602_voltage', 'TGS2602_raw_voltage', 'TGS2602_compensated_voltage', 'TGS2602_resistance', 'TGS2602_compensated_resistance',
+            'TGS2602_rs_r0_ratio', 'TGS2602_ppm', 'TGS2602_drift_factor', 'TGS2602_normalization_factor',
+            'TGS2610_voltage', 'TGS2610_raw_voltage', 'TGS2610_compensated_voltage', 'TGS2610_resistance', 'TGS2610_compensated_resistance',
+            'TGS2610_rs_r0_ratio', 'TGS2610_ppm', 'TGS2610_drift_factor', 'TGS2610_normalization_factor',
+            'predicted_gas', 'confidence'
+        ]
+
+        monitoring_file = f"data/monitoring_{monitoring_mode}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+        with open(monitoring_file, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            start_time = time.time()
+            sample_count = 0
+
+            try:
+                while self.is_collecting:
+                    timestamp = datetime.now()
+                    readings = self.read_sensors()
+                    predicted_gas, confidence = self.predict_gas(readings)
+
+                    data_row = {
+                        'timestamp': timestamp,
+                        'temperature': self.current_temperature,
+                        'humidity': self.current_humidity,
+                        'sensor_mode': monitoring_mode,
+
+                        'TGS2600_voltage': readings['TGS2600']['voltage'],
+                        'TGS2600_raw_voltage': readings['TGS2600']['raw_voltage'],
+                        'TGS2600_compensated_voltage': readings['TGS2600']['compensated_voltage'],
+                        'TGS2600_resistance': readings['TGS2600']['resistance'],
+                        'TGS2600_compensated_resistance': readings['TGS2600']['compensated_resistance'],
+                        'TGS2600_rs_r0_ratio': readings['TGS2600']['rs_r0_ratio'],
+                        'TGS2600_ppm': readings['TGS2600']['ppm'],
+                        'TGS2600_drift_factor': readings['TGS2600']['drift_factor'],
+                        'TGS2600_normalization_factor': readings['TGS2600']['normalization_factor'],
+
+                        'TGS2602_voltage': readings['TGS2602']['voltage'],
+                        'TGS2602_raw_voltage': readings['TGS2602']['raw_voltage'],
+                        'TGS2602_compensated_voltage': readings['TGS2602']['compensated_voltage'],
+                        'TGS2602_resistance': readings['TGS2602']['resistance'],
+                        'TGS2602_compensated_resistance': readings['TGS2602']['compensated_resistance'],
+                        'TGS2602_rs_r0_ratio': readings['TGS2602']['rs_r0_ratio'],
+                        'TGS2602_ppm': readings['TGS2602']['ppm'],
+                        'TGS2602_drift_factor': readings['TGS2602']['drift_factor'],
+                        'TGS2602_normalization_factor': readings['TGS2602']['normalization_factor'],
+
+                        'TGS2610_voltage': readings['TGS2610']['voltage'],
+                        'TGS2610_raw_voltage': readings['TGS2610']['raw_voltage'],
+                        'TGS2610_compensated_voltage': readings['TGS2610']['compensated_voltage'],
+                        'TGS2610_resistance': readings['TGS2610']['resistance'],
+                        'TGS2610_compensated_resistance': readings['TGS2610']['compensated_resistance'],
+                        'TGS2610_rs_r0_ratio': readings['TGS2610']['rs_r0_ratio'],
+                        'TGS2610_ppm': readings['TGS2610']['ppm'],
+                        'TGS2610_drift_factor': readings['TGS2610']['drift_factor'],
+                        'TGS2610_normalization_factor': readings['TGS2610']['normalization_factor'],
+
+                        'predicted_gas': predicted_gas,
+                        'confidence': confidence
+                    }
+
+                    writer.writerow(data_row)
+                    sample_count += 1
+
+                    # Enhanced display with smart status
+                    smart_status = "SMART_COMP" if any(readings[s]['smart_compensation_applied'] for s in readings.keys()) else "RAW"
+                    
+                    print(f"\r{timestamp.strftime('%H:%M:%S')} | Mode: {monitoring_mode.title()} | Status: {smart_status} | "
+                          f"2600: {readings['TGS2600']['ppm']:.0f}ppm | "
+                          f"2602: {readings['TGS2602']['ppm']:.0f}ppm | "
+                          f"2610: {readings['TGS2610']['ppm']:.0f}ppm | "
+                          f"Predicted: {predicted_gas} ({confidence:.2f})", end="")
+
+                    max_ppm = max(readings['TGS2600']['ppm'], readings['TGS2602']['ppm'], readings['TGS2610']['ppm'])
+                    if max_ppm > 50 and confidence > 0.7:
+                        print(f"\n*** GAS DETECTION ALERT: {predicted_gas} detected! ***")
+
+                    if duration and (time.time() - start_time) >= duration:
+                        break
+
+                    time.sleep(1)
+
+            except KeyboardInterrupt:
+                print("\nMonitoring stopped by user")
+
+        self.is_collecting = False
+        self.logger.info(f"Enhanced monitoring data with Smart Drift compensation saved to {monitoring_file}")
+        self.logger.info(f"Total samples collected: {sample_count}")
+
+    def stop_monitoring(self):
+        """Stop continuous monitoring"""
+        self.is_collecting = False
+
+    def set_environmental_conditions(self, temperature=None, humidity=None):
+        """Set current environmental conditions for compensation"""
+        if temperature is not None:
+            self.current_temperature = temperature
+            self.logger.info(f"Temperature set to {temperature}°C")
+
+        if humidity is not None:
+            self.current_humidity = humidity
+            self.logger.info(f"Humidity set to {humidity}%RH")
+
+def main():
+    """Enhanced main function with Smart Drift Management"""
+    gas_sensor = EnhancedDatasheetGasSensorArray()
+
+    # Load existing calibration if available
+    gas_sensor.load_calibration()
+
+    # Load existing model if available
+    gas_sensor.load_model()
+
+    # Check if daily drift check is needed
+    if gas_sensor.drift_manager.is_daily_check_needed():
+        print("\n" + "="*70)
+        print("🧠 SMART DAILY DRIFT CHECK RECOMMENDED")
+        print("Your sensors may have drifted since yesterday.")
+        print("Smart system can automatically compensate without hardware changes.")
+        print("="*70)
+        
+        response = input("Run smart daily drift check now? (y/n): ").lower()
+        if response == 'y':
+            gas_sensor.drift_manager.smart_drift_check(gas_sensor)
+
+    while True:
+        print("\n" + "="*70)
+        print("🧠 SMART Gas Sensor Array System - USV Air Pollution Detection")
+        print("Smart Drift Compensation: Auto-Baseline + Model Compatibility")
+        print("="*70)
+        print("1. Calibrate sensors (Enhanced R0 determination)")
+        print("2. Collect training data (Auto-switch to Extended mode)")
+        print("3. Train machine learning model (Smart features)")
+        print("4. Start monitoring - Datasheet mode (Accurate detection)")
+        print("5. Start monitoring - Extended mode (Full range)")
+        print("6. Test single reading (Detailed analysis with smart info)")
+        print("7. Set environmental conditions (T°C, %RH)")
+        print("8. Switch sensor calculation mode")
+        print("9. View sensor diagnostics")
+        print("10. Exit")
+        print("-" * 40)
+        print("🧠 SMART DRIFT COMPENSATION FEATURES:")
+        print("11. Smart daily drift check (1.6V optimized)")
+        print("12. Quick stability test")
+        print("13. Smart drift status report") 
+        print("14. Manual drift compensation reset")
+        print("15. 🆕 AUTO BASELINE RESET (recommended for high drift)")
+        print("16. 🆕 Smart system health check")
+        print("-"*70)
+
+        try:
+            choice = input("Select option (1-16): ").strip()
+
+            if choice == '1':
+                duration = int(input("Calibration duration (seconds, default 300): ") or 300)
+                print("Ensure sensors are warmed up for at least 10 minutes in clean air!")
+                confirm = input("Continue with calibration? (y/n): ").lower()
+                if confirm == 'y':
+                    gas_sensor.calibrate_sensors(duration)
+
+            elif choice == '2':
+                gas_types = ['normal', 'alcohol', 'pertalite', 'pertamax', 'dexlite', 'biosolar',
+                           'hydrogen', 'toluene', 'ammonia', 'butane', 'propane']
+                print("Available gas types:", ', '.join(gas_types))
+                print("⚠️  IMPORTANT: Collect 'normal' data first for baseline!")
+                gas_type = input("Enter gas type: ").strip().lower()
+
+                if gas_type not in gas_types:
+                    print("Invalid gas type!")
+                    continue
+
+                duration = int(input("Collection duration (seconds, default 60): ") or 60)
+                print("🔄 Auto-switching to EXTENDED mode for training...")
+                gas_sensor.collect_training_data(gas_type, duration)
+
+            elif choice == '3':
+                print("🤖 Training model with Smart Drift compensation features...")
+                if gas_sensor.train_model():
+                    print("✅ Smart model training completed successfully!")
+                    print("Model includes drift correction and baseline normalization.")
+                else:
+                    print("❌ Model training failed!")
+
+            elif choice == '4':
+                duration_input = input("Monitoring duration (seconds, Enter for infinite): ").strip()
+                duration = int(duration_input) if duration_input else None
+
+                print("🎯 Smart monitoring in DATASHEET mode")
+                gas_sensor.continuous_monitoring(duration, 'datasheet')
+
+            elif choice == '5':
+                duration_input = input("Monitoring duration (seconds, Enter for infinite): ").strip()
+                duration = int(duration_input) if duration_input else None
+
+                print("📊 Smart monitoring in EXTENDED mode")
+                gas_sensor.continuous_monitoring(duration, 'extended')
+
+            elif choice == '6':
+                readings = gas_sensor.read_sensors()
+                predicted_gas, confidence = gas_sensor.predict_gas(readings)
+
+                print("\n" + "="*70)
+                print("🧠 SMART SENSOR ANALYSIS - WITH DRIFT COMPENSATION")
+                print("="*70)
+
+                for sensor, data in readings.items():
+                    print(f"\n{sensor} ({data['mode']} mode):")
+                    print(f"  Model Voltage: {data['voltage']:.3f}V (for prediction)")
+                    
+                    if data['smart_compensation_applied']:
+                        drift_percent = abs(1 - data['drift_factor']) * 100
+                        norm_percent = abs(1 - data['normalization_factor']) * 100
+                        print(f"  Raw Voltage: {data['raw_voltage']:.3f}V")
+                        print(f"  Compensated Voltage: {data['compensated_voltage']:.3f}V")
+                        print(f"  🧠 Smart Compensation: Drift {drift_percent:.1f}% + Norm {norm_percent:.1f}%")
+                    else:
+                        print(f"  Raw Voltage: {data['raw_voltage']:.3f}V (no compensation)")
+                    
+                    print(f"  Resistance: {data['resistance']:.1f}Ω")
+                    print(f"  Compensated Resistance: {data['compensated_resistance']:.1f}Ω")
+                    if data['rs_r0_ratio']:
+                        print(f"  Rs/R0 Ratio: {data['rs_r0_ratio']:.3f}")
+                    else:
+                        print(f"  Rs/R0 Ratio: Not calibrated")
+                    print(f"  PPM: {data['ppm']:.0f} ({'No limit' if data['mode'] == 'Extended' else 'Datasheet limit'})")
+                    print(f"  Target Gases: {', '.join(data['target_gases'])}")
+                    print(f"  R0 (Baseline): {data['R0']:.1f}Ω" if data['R0'] else "  R0: Not calibrated")
+
+                print(f"\nENVIRONMENTAL CONDITIONS:")
+                print(f"  Temperature: {gas_sensor.current_temperature}°C")
+                print(f"  Humidity: {gas_sensor.current_humidity}%RH")
+
+                print(f"\n🧠 SMART PREDICTION (Model Compatible):")
+                print(f"  Gas Type: {predicted_gas}")
+                print(f"  Confidence: {confidence:.3f}")
+
+                if confidence < 0.5:
+                    print("  ⚠️  Low confidence - may need Smart baseline reset")
+                elif confidence < 0.7:
+                    print("  ⚠️  Medium confidence")
+                else:
+                    print("  ✅ High confidence")
+
+            elif choice == '7':
+                print("\nSet Environmental Conditions:")
+                temp_input = input("Temperature (°C, current: {:.1f}): ".format(gas_sensor.current_temperature))
+                humidity_input = input("Humidity (%RH, current: {:.1f}): ".format(gas_sensor.current_humidity))
+
+                temp = float(temp_input) if temp_input else None
+                humidity = float(humidity_input) if humidity_input else None
+
+                gas_sensor.set_environmental_conditions(temp, humidity)
+
+            elif choice == '8':
+                current_mode = 'Extended' if gas_sensor.sensor_config['TGS2600']['use_extended_mode'] else 'Datasheet'
+                print(f"\nCurrent mode: {current_mode}")
+                print("1. Datasheet mode (accurate detection, limited range)")
+                print("2. Extended mode (unlimited range for training)")
+
+                mode_choice = input("Select mode (1-2): ").strip()
+                if mode_choice == '1':
+                    gas_sensor.set_sensor_mode('datasheet')
+                elif mode_choice == '2':
+                    gas_sensor.set_sensor_mode('extended')
+                else:
+                    print("Invalid choice!")
+
+            elif choice == '9':
+                print("\n" + "="*70)
+                print("🧠 SMART SENSOR DIAGNOSTICS")
+                print("="*70)
+
+                for sensor_name, config in gas_sensor.sensor_config.items():
+                    current_mode = 'Extended' if config['use_extended_mode'] else 'Datasheet'
+                    drift_factor = gas_sensor.drift_manager.drift_compensation_factors.get(sensor_name, 1.0)
+                    norm_factor = gas_sensor.drift_manager.normalization_factors.get(sensor_name, 1.0)
+                    drift_percent = abs(1 - drift_factor) * 100
+                    norm_percent = abs(1 - norm_factor) * 100
+                    
+                    print(f"\n{sensor_name} ({current_mode} mode):")
+                    print(f"  Power Consumption: {config['power_consumption']*1000:.0f}mW")
+                    print(f"  Heater Current: {config['heater_current']*1000:.0f}mA")
+                    print(f"  Datasheet Range: {config['detection_range']} ppm")
+                    print(f"  Extended Range: {config['extended_range']} ppm")
+                    print(f"  Operating Temp: {config['operating_temp_range']}°C")
+                    print(f"  Target Gases: {', '.join(config['target_gases'])}")
+
+                    if config['R0']:
+                        print(f"  Calibrated R0: {config['R0']:.1f}Ω")
+                        print(f"  Baseline Voltage: {config['baseline_voltage']:.3f}V")
+                    else:
+                        print(f"  ⚠️  Not calibrated")
+                    
+                    if drift_percent > 0:
+                        print(f"  🧠 Drift Compensation: {drift_percent:.1f}% (factor: {drift_factor:.3f})")
+                    else:
+                        print(f"  ✅ No drift compensation active")
+                        
+                    if norm_percent > 0:
+                        print(f"  🧠 Baseline Normalization: {norm_percent:.1f}% (factor: {norm_factor:.3f})")
+                    else:
+                        print(f"  ✅ No normalization needed")
+
+            # SMART DRIFT COMPENSATION OPTIONS
+            elif choice == '11':
+                print("\n🧠 SMART DAILY DRIFT CHECK")
+                print("Optimized for 1.6V baseline with mV-based tolerances")
+                print("✅ Automatic compensation without hardware changes")
+                print("✅ Model compatibility preserved")
+                
+                gas_sensor.drift_manager.smart_drift_check(gas_sensor)
+
+            elif choice == '12':
+                print("\n⚡ QUICK STABILITY TEST")
+                print("Testing sensor stability over 1 minute...")
+                
+                # Implement quick stability test (simplified version)
+                readings = {sensor: [] for sensor in gas_sensor.sensor_config.keys()}
+                
+                print("Taking 30 readings over 1 minute...")
+                
+                for i in range(30):
+                    sensor_readings = gas_sensor.read_sensors()
+                    
+                    for sensor_name, data in sensor_readings.items():
+                        readings[sensor_name].append(data['voltage'])
+                    
+                    time.sleep(2)
+                    print(f"\rProgress: {i+1}/30", end="")
+                
+                print("\n\nSTABILITY TEST RESULTS:")
+                print("-" * 40)
+                
+                for sensor_name, voltages in readings.items():
+                    voltages_array = np.array(voltages)
+                    mean_v = np.mean(voltages_array)
+                    std_v = np.std(voltages_array)
+                    stability_percent = (std_v / mean_v) * 100
+                    
+                    drift_factor = gas_sensor.drift_manager.drift_compensation_factors.get(sensor_name, 1.0)
+                    drift_compensation = abs(1 - drift_factor) * 100
+                    
+                    status = 'EXCELLENT' if stability_percent < 1 else \
+                            'GOOD' if stability_percent < 2 else \
+                            'MODERATE' if stability_percent < 5 else 'POOR'
+                    
+                    print(f"\n{sensor_name}:")
+                    print(f"  Mean Voltage: {mean_v:.3f}V ± {std_v:.3f}V")
+                    print(f"  Stability: {stability_percent:.2f}% ({status})")
+                    print(f"  Smart Compensation: {drift_compensation:.1f}%")
+
+            elif choice == '13':
+                print("\n🧠 SMART DRIFT STATUS REPORT")
+                status = gas_sensor.drift_manager.get_smart_status()
+                
+                print("="*60)
+                print("DRIFT COMPENSATION STATUS:")
+                if status['drift_compensation']:
+                    for sensor, info in status['drift_compensation'].items():
+                        print(f"  {sensor}: {info['compensation_percent']:.1f}% ({info['level']})")
+                else:
+                    print("  ✅ No drift compensation active")
+                
+                print("\nBASELINE NORMALIZATION STATUS:")
+                for sensor, info in status['baseline_normalization'].items():
+                    compat = "✅ Compatible" if info['model_compatible'] else "⚠️ Check needed"
+                    print(f"  {sensor}: {info['normalization_percent']:.1f}% - {compat}")
+                
+                print(f"\nOVERALL SYSTEM HEALTH: {status['overall_health']}")
+                print(f"MODEL COMPATIBILITY: {'✅ GOOD' if status['model_compatible'] else '⚠️ NEEDS ATTENTION'}")
+
+            elif choice == '14':
+                print("\n🔄 MANUAL DRIFT COMPENSATION RESET")
+                print("This will:")
+                print("  1. Remove all current drift compensation factors")
+                print("  2. Reset baseline normalization factors")
+                print("  3. Force new drift check on next run")
+                
+                confirm = input("\nAre you sure? (y/n): ").lower()
+                if confirm == 'y':
+                    gas_sensor.drift_manager.drift_compensation_factors = {}
+                    gas_sensor.drift_manager.normalization_factors = {
+                        'TGS2600': 1.0, 'TGS2602': 1.0, 'TGS2610': 1.0
+                    }
+                    gas_sensor.drift_manager.daily_check_done = False
+                    gas_sensor.drift_manager.save_drift_data()
+                    print("✅ Smart drift compensation reset completed!")
+
+            elif choice == '15':
+                print("\n⚡ AUTO BASELINE RESET - SMART SOLUTION")
+                print("🆕 BEST solution for high drift without hardware changes!")
+                print("✅ Accepts current voltages as new baseline")
+                print("✅ Preserves model compatibility")
+                print("✅ No training data collection needed")
+                
+                confirm = input("\nThis is the recommended solution for high drift. Proceed? (y/n): ").lower()
+                if confirm == 'y':
+                    success = gas_sensor.drift_manager.auto_baseline_reset(gas_sensor)
+                    if success:
+                        print("\n🎉 AUTO BASELINE RESET SUCCESSFUL!")
+                        print("✅ System is now optimized and ready to use")
+                        print("✅ Your model will continue working normally")
+
+            elif choice == '16':
+                print("\n🧠 SMART SYSTEM HEALTH CHECK")
+                print("Comprehensive analysis of sensor and drift compensation system...")
+                
+                # Perform comprehensive health check
+                current_readings = gas_sensor.read_sensors()
+                status = gas_sensor.drift_manager.get_smart_status()
+                
+                print("\n" + "="*60)
+                print("SMART SYSTEM HEALTH REPORT")
+                print("="*60)
+                
+                print("\n📊 CURRENT SENSOR STATUS:")
+                all_good = True
+                for sensor_name, data in current_readings.items():
+                    baseline = gas_sensor.drift_manager.current_baseline.get(sensor_name, 1.6)
+                    drift_mv = abs(data['raw_voltage'] - baseline) * 1000
+                    
+                    if drift_mv <= 20:
+                        sensor_status = "✅ EXCELLENT"
+                    elif drift_mv <= 50:
+                        sensor_status = "✅ GOOD" 
+                    elif drift_mv <= 100:
+                        sensor_status = "🔧 MODERATE"
+                        all_good = False
+                    elif drift_mv <= 200:
+                        sensor_status = "⚠️ HIGH"
+                        all_good = False
+                    else:
+                        sensor_status = "❌ CRITICAL"
+                        all_good = False
+                    
+                    print(f"  {sensor_name}: {data['raw_voltage']:.3f}V | Drift: {drift_mv:.0f}mV | {sensor_status}")
+                
+                print(f"\n🎯 SYSTEM PERFORMANCE:")
+                if status['model_compatible'] and all_good:
+                    print("✅ SYSTEM STATUS: OPTIMAL")
+                    print("✅ All sensors stable and model compatible")
+                    print("✅ Ready for high-accuracy gas detection")
+                elif status['model_compatible']:
+                    print("🔧 SYSTEM STATUS: GOOD with compensation")
+                    print("🔧 Smart compensation handling drift effectively")
+                    print("✅ Model compatibility maintained")
+                else:
+                    print("⚠️ SYSTEM STATUS: NEEDS ATTENTION")
+                    print("⚠️ Consider AUTO BASELINE RESET (Option 15)")
+                
+                print(f"\n💡 RECOMMENDATIONS:")
+                if all_good and status['model_compatible']:
+                    print("✅ System performing optimally - continue normal operation")
+                elif status['model_compatible']:
+                    print("🔧 System stable with compensation - monitor drift trends")
+                else:
+                    print("⚡ Run AUTO BASELINE RESET (Option 15) for optimal performance")
+
+            elif choice == '10':
+                print("👋 Exiting Smart Gas Sensor System...")
+                gas_sensor.drift_manager.save_drift_data()
+                break
+
+            else:
+                print("❌ Invalid option!")
+
+        except KeyboardInterrupt:
+            print("\nOperation cancelled by user")
+        except ValueError:
+            print("❌ Invalid input!")
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            gas_sensor.logger.error(f"Unexpected error: {e}")
+
+if __name__ == "__main__":
+    main()
