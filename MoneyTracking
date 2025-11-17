@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Money Tracking & Budgeting - Cloud Sync</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to right, #667eea, #764ba2);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #4c51bf;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h3 {
+            color: #374151;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        .auth-section {
+            background: #f0f9ff;
+            border: 2px solid #3b82f6;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .auth-section.logged-in {
+            background: #d1fae5;
+            border-color: #10b981;
+        }
+        .auth-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .user-email {
+            font-weight: bold;
+            color: #065f46;
+        }
+        .sync-status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .sync-status.synced {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .sync-status.syncing {
+            background: #fef3c7;
+            color: #78350f;
+        }
+        .login-form {
+            display: grid;
+            gap: 10px;
+        }
+        .login-form input {
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .btn-auth {
+            padding: 12px;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .btn-auth:active {
+            transform: scale(0.98);
+        }
+        .btn-login {
+            background: #3b82f6;
+            color: white;
+        }
+        .btn-login:hover {
+            background: #2563eb;
+        }
+        .btn-register {
+            background: #10b981;
+            color: white;
+        }
+        .btn-register:hover {
+            background: #059669;
+        }
+        .btn-logout {
+            background: #ef4444;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .btn-logout:hover {
+            background: #dc2626;
+        }
+        .top-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+        .btn-export, .btn-import, .btn-reset, .btn-sync {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .btn-export {
+            background: #10b981;
+            color: white;
+        }
+        .btn-import {
+            background: #3b82f6;
+            color: white;
+        }
+        .btn-reset {
+            background: #ef4444;
+            color: white;
+        }
+        .btn-sync {
+            background: #8b5cf6;
+            color: white;
+        }
+        .month-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .month-selector select {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #e5e7eb;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .accounts {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .account {
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .account.cash { background: #d1fae5; border: 2px solid #10b981; }
+        .account.bank { background: #dbeafe; border: 2px solid #3b82f6; }
+        .account.credit { background: #e9d5ff; border: 2px solid #a855f7; }
+        .account.total { background: #e0e7ff; border: 2px solid #6366f1; }
+        .account-label {
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .account-amount {
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .tab {
+            flex: 1;
+            padding: 12px;
+            background: #e5e7eb;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .tab.active {
+            background: #4c51bf;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e5e7eb;
+            border-radius: 5px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .btn {
+            width: 100%;
+            padding: 15px;
+            background: #4c51bf;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .btn:hover {
+            background: #4338ca;
+        }
+        .btn:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .transaction {
+            padding: 15px;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .transaction-info {
+            flex: 1;
+        }
+        .transaction-category {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .transaction-date {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .transaction-amount {
+            font-size: 18px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .transaction-amount.income { color: #10b981; }
+        .transaction-amount.expense { color: #ef4444; }
+        .btn-delete {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .empty {
+            text-align: center;
+            padding: 40px;
+            color: #9ca3af;
+        }
+        .overview-cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .overview-card {
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .overview-label {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .overview-value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .chart-container {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+        .bar-chart {
+            display: flex;
+            align-items: flex-end;
+            height: 200px;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .bar {
+            flex: 1;
+            background: #4c51bf;
+            border-radius: 5px 5px 0 0;
+            position: relative;
+            min-height: 5px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: center;
+        }
+        .bar-value {
+            position: absolute;
+            top: -25px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #374151;
+        }
+        .bar-label {
+            margin-top: 5px;
+            font-size: 11px;
+            text-align: center;
+            color: #6b7280;
+        }
+        .category-breakdown {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .category-list {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .category-item {
+            margin-bottom: 15px;
+        }
+        .category-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        .category-name {
+            font-weight: bold;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background: #e5e7eb;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            border-radius: 5px;
+            transition: width 0.3s;
+        }
+        .progress-fill.income { background: #10b981; }
+        .progress-fill.expense { background: #ef4444; }
+        .pie-chart {
+            width: 100%;
+            height: 250px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .pie-slice {
+            stroke: white;
+            stroke-width: 2;
+        }
+        .legend {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+        }
+        @media (max-width: 768px) {
+            .accounts {
+                grid-template-columns: 1fr 1fr;
+            }
+            .overview-cards {
+                grid-template-columns: 1fr;
+            }
+            .category-breakdown {
+                grid-template-columns: 1fr;
+            }
+            .top-actions {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💰 Money Tracking & Budgeting</h1>
+        
+        <!-- Auth Section -->
+        <div class="auth-section" id="authSection">
+            <div id="loginArea">
+                <h3 style="margin-top: 0;">🔐 Login / Register untuk Sync Data</h3>
+                <div class="login-form">
+                    <input type="email" id="authEmail" placeholder="Email Anda" autocomplete="email">
+                    <input type="password" id="authPassword" placeholder="Password (min 6 karakter)" autocomplete="current-password">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <button type="button" class="btn-auth btn-login" id="loginBtn">Login</button>
+                        <button type="button" class="btn-auth btn-register" id="registerBtn">Register</button>
+                    </div>
+                </div>
+            </div>
+            <div id="loggedInArea" style="display: none;">
+                <div class="auth-info">
+                    <div>
+                        <span>👤 <span class="user-email" id="userEmail"></span></span>
+                        <span class="sync-status synced" id="syncStatus">☁️ Synced</span>
+                    </div>
+                    <button class="btn-logout" id="logoutBtn">Logout</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div id="mainContent" style="display: none;">
+            <!-- Action Buttons -->
+            <div class="top-actions">
+                <button class="btn-sync" id="syncBtn">🔄 Sync Manual</button>
+                <button class="btn-export" id="exportBtn">📥 Export</button>
+                <button class="btn-import" id="importBtn">📤 Import</button>
+                <button class="btn-reset" id="resetBtn">🗑️ Reset</button>
+                <input type="file" id="importFile" accept=".json" style="display:none">
+            </div>
+
+            <!-- Month Selector -->
+            <div class="month-selector">
+                <select id="monthSelect">
+                    <option value="0">Januari</option>
+                    <option value="1">Februari</option>
+                    <option value="2">Maret</option>
+                    <option value="3">April</option>
+                    <option value="4">Mei</option>
+                    <option value="5">Juni</option>
+                    <option value="6">Juli</option>
+                    <option value="7">Agustus</option>
+                    <option value="8">September</option>
+                    <option value="9">Oktober</option>
+                    <option value="10">November</option>
+                    <option value="11">Desember</option>
+                </select>
+                <select id="yearSelect">
+                    <option value="2023">2023</option>
+                    <option value="2024">2024</option>
+                    <option value="2025">2025</option>
+                    <option value="2026">2026</option>
+                </select>
+            </div>
+
+            <!-- Accounts -->
+            <div class="accounts">
+                <div class="account cash">
+                    <div class="account-label">CASH</div>
+                    <div class="account-amount" id="cashAmount">Rp 0</div>
+                </div>
+                <div class="account bank">
+                    <div class="account-label">BANK</div>
+                    <div class="account-amount" id="bankAmount">Rp 0</div>
+                </div>
+                <div class="account credit">
+                    <div class="account-label">KARTU KREDIT</div>
+                    <div class="account-amount" id="creditAmount">Rp 0</div>
+                </div>
+                <div class="account total">
+                    <div class="account-label">TOTAL ASET</div>
+                    <div class="account-amount" id="totalAmount">Rp 0</div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" data-tab="0">Input Transaksi</button>
+                <button class="tab" data-tab="1">Riwayat</button>
+                <button class="tab" data-tab="2">Overview</button>
+            </div>
+
+            <!-- Tab Input -->
+            <div class="tab-content active" id="tab0">
+                <div class="form-group">
+                    <label>Tanggal</label>
+                    <input type="date" id="date">
+                </div>
+                <div class="form-group">
+                    <label>Tipe</label>
+                    <select id="type">
+                        <option value="expense">Pengeluaran</option>
+                        <option value="income">Pemasukan</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Kategori</label>
+                    <select id="category">
+                        <option value="">Pilih kategori...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Akun</label>
+                    <select id="account">
+                        <option value="cash">Cash</option>
+                        <option value="bank">Bank</option>
+                        <option value="credit">Kartu Kredit</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Jumlah (Rp)</label>
+                    <input type="number" id="amount" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label>Keterangan</label>
+                    <input type="text" id="description" placeholder="Opsional">
+                </div>
+                <button class="btn" id="addTransactionBtn">Tambah Transaksi</button>
+            </div>
+
+            <!-- Tab History -->
+            <div class="tab-content" id="tab1">
+                <h3 id="historyTitle">Riwayat Transaksi</h3>
+                <div id="transactions"></div>
+            </div>
+
+            <!-- Tab Overview -->
+            <div class="tab-content" id="tab2">
+                <h3 id="overviewTitle">Overview Bulan Ini</h3>
+                
+                <div class="overview-cards">
+                    <div class="overview-card" style="background: #d1fae5;">
+                        <div class="overview-label" style="color: #065f46;">Total Pemasukan</div>
+                        <div class="overview-value" style="color: #10b981;" id="totalIncome">Rp 0</div>
+                    </div>
+                    <div class="overview-card" style="background: #fee2e2;">
+                        <div class="overview-label" style="color: #7f1d1d;">Total Pengeluaran</div>
+                        <div class="overview-value" style="color: #ef4444;" id="totalExpense">Rp 0</div>
+                    </div>
+                    <div class="overview-card" style="background: #dbeafe;">
+                        <div class="overview-label" style="color: #1e3a8a;">Saldo Bersih</div>
+                        <div class="overview-value" style="color: #3b82f6;" id="balance">Rp 0</div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3 style="margin-top: 0;">Grafik Pemasukan vs Pengeluaran</h3>
+                    <div class="bar-chart" id="barChart"></div>
+                </div>
+
+                <div class="category-breakdown">
+                    <div class="category-list">
+                        <h3 style="margin-top: 0;">Kategori Pemasukan</h3>
+                        <div id="incomeBreakdown"></div>
+                    </div>
+                    <div class="category-list">
+                        <h3 style="margin-top: 0;">Kategori Pengeluaran</h3>
+                        <div id="expenseBreakdown"></div>
+                    </div>
+                </div>
+
+                <div class="category-breakdown" style="margin-top: 30px;">
+                    <div class="chart-container">
+                        <h3 style="margin-top: 0;">Distribusi Pemasukan</h3>
+                        <svg class="pie-chart" id="incomePie" viewBox="0 0 200 200"></svg>
+                        <div class="legend" id="incomeLegend"></div>
+                    </div>
+                    <div class="chart-container">
+                        <h3 style="margin-top: 0;">Distribusi Pengeluaran</h3>
+                        <svg class="pie-chart" id="expensePie" viewBox="0 0 200 200"></svg>
+                        <div class="legend" id="expenseLegend"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <script>
+        console.log('=== SCRIPT STARTED ===');
+        
+        // ===== FIREBASE CONFIGURATION =====
+        const firebaseConfig = {
+            apiKey: "AIzaSyADAZLDdIWtFkvP7xxllW7bL39o5h8idNU",
+            authDomain: "money-tracking-a6334.firebaseapp.com",
+            databaseURL: "https://money-tracking-a6334-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "money-tracking-a6334",
+            storageBucket: "money-tracking-a6334.firebasestorage.app",
+            messagingSenderId: "371485877266",
+            appId: "1:371485877266:web:789898b4df912f27cc64cb"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const database = firebase.database();
+        
+        console.log('Firebase initialized');
+
+        // ===== GLOBAL VARIABLES =====
+        var currentUser = null;
+        var accounts = { cash: 0, bank: 0, credit: 0 };
+        var transactions = [];
+        var selectedMonth = new Date().getMonth();
+        var selectedYear = new Date().getFullYear();
+
+        var incomeCategories = ['Gaji', 'Bonus', 'Investasi', 'Bisnis', 'Freelance', 'Hadiah', 'Lainnya'];
+        var expenseCategories = ['Makanan & Minuman', 'Transport', 'Belanja', 'Tagihan', 'Kesehatan', 'Hiburan', 'Pendidikan', 'Menabung', 'Investasi', 'Lainnya'];
+        var pieColors = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'];
+
+        // ===== AUTH FUNCTIONS =====
+        auth.onAuthStateChanged(function(user) {
+            console.log('Auth state changed:', user ? user.email : 'not logged in');
+            
+            if (user) {
+                currentUser = user;
+                document.getElementById('loginArea').style.display = 'none';
+                document.getElementById('loggedInArea').style.display = 'block';
+                document.getElementById('mainContent').style.display = 'block';
+                document.getElementById('userEmail').textContent = user.email;
+                document.getElementById('authSection').classList.add('logged-in');
+                loadDataFromFirebase();
+            } else {
+                currentUser = null;
+                document.getElementById('loginArea').style.display = 'block';
+                document.getElementById('loggedInArea').style.display = 'none';
+                document.getElementById('mainContent').style.display = 'none';
+                document.getElementById('authSection').classList.remove('logged-in');
+            }
+        });
+
+        function registerUser() {
+            console.log('=== REGISTER FUNCTION CALLED ===');
+            
+            var email = document.getElementById('authEmail').value;
+            var password = document.getElementById('authPassword').value;
+
+            console.log('Email:', email);
+            console.log('Password length:', password ? password.length : 0);
+
+            if (!email || !password) {
+                alert('Mohon isi email dan password!');
+                return;
+            }
+
+            if (password.length < 6) {
+                alert('Password minimal 6 karakter!');
+                return;
+            }
+
+            console.log('Attempting Firebase registration...');
+
+            auth.createUserWithEmailAndPassword(email, password)
+                .then(function(userCredential) {
+                    console.log('Registration SUCCESS:', userCredential.user.email);
+                    alert('Registrasi berhasil! Anda sudah login.');
+                    document.getElementById('authEmail').value = '';
+                    document.getElementById('authPassword').value = '';
+                })
+                .catch(function(error) {
+                    console.error('Registration ERROR:', error.code, error.message);
+                    
+                    var errorMsg = 'Error: ';
+                    if (error.code === 'auth/email-already-in-use') {
+                        errorMsg += 'Email sudah terdaftar! Gunakan tombol Login.';
+                    } else if (error.code === 'auth/invalid-email') {
+                        errorMsg += 'Format email tidak valid!';
+                    } else if (error.code === 'auth/weak-password') {
+                        errorMsg += 'Password terlalu lemah!';
+                    } else {
+                        errorMsg += error.message;
+                    }
+                    
+                    alert(errorMsg);
+                });
+        }
+
+        function loginUser() {
+            console.log('=== LOGIN FUNCTION CALLED ===');
+            
+            var email = document.getElementById('authEmail').value;
+            var password = document.getElementById('authPassword').value;
+
+            console.log('Email:', email);
+            console.log('Password length:', password ? password.length : 0);
+
+            if (!email || !password) {
+                alert('Mohon isi email dan password!');
+                console.log('Login cancelled - empty fields');
+                return;
+            }
+
+            if (password.length < 6) {
+                alert('Password minimal 6 karakter!');
+                console.log('Login cancelled - password too short');
+                return;
+            }
+
+            console.log('Attempting Firebase login...');
+
+            auth.signInWithEmailAndPassword(email, password)
+                .then(function(userCredential) {
+                    console.log('Login SUCCESS:', userCredential.user.email);
+                    alert('Login berhasil!');
+                    document.getElementById('authEmail').value = '';
+                    document.getElementById('authPassword').value = '';
+                })
+                .catch(function(error) {
+                    console.error('Login ERROR:', error.code, error.message);
+                    
+                    var errorMsg = 'Error: ';
+                    if (error.code === 'auth/wrong-password') {
+                        errorMsg += 'Password salah!';
+                    } else if (error.code === 'auth/user-not-found') {
+                        errorMsg += 'Email tidak terdaftar! Gunakan Register.';
+                    } else if (error.code === 'auth/invalid-email') {
+                        errorMsg += 'Format email tidak valid!';
+                    } else if (error.code === 'auth/too-many-requests') {
+                        errorMsg += 'Terlalu banyak percobaan. Coba lagi nanti.';
+                    } else {
+                        errorMsg += error.message;
+                    }
+                    
+                    alert(errorMsg);
+                });
+        }
+
+        function logoutUser() {
+            console.log('=== LOGOUT FUNCTION CALLED ===');
+            
+            if (confirm('Logout dari akun ini?')) {
+                auth.signOut()
+                    .then(function() {
+                        console.log('Logout SUCCESS');
+                        accounts = { cash: 0, bank: 0, credit: 0 };
+                        transactions = [];
+                    })
+                    .catch(function(error) {
+                        console.error('Logout ERROR:', error);
+                    });
+            }
+        }
+
+        // ===== FIREBASE DATA FUNCTIONS =====
+        function setSyncStatus(status) {
+            var statusEl = document.getElementById('syncStatus');
+            if (status === 'syncing') {
+                statusEl.textContent = '⏳ Syncing...';
+                statusEl.className = 'sync-status syncing';
+            } else {
+                statusEl.textContent = '☁️ Synced';
+                statusEl.className = 'sync-status synced';
+            }
+        }
+
+        function saveToFirebase() {
+            if (!currentUser) {
+                console.log('Cannot save - not logged in');
+                return;
+            }
+
+            console.log('Saving to Firebase...');
+            setSyncStatus('syncing');
+            
+            var userRef = database.ref('users/' + currentUser.uid);
+            var data = {
+                accounts: accounts,
+                transactions: transactions,
+                lastUpdated: new Date().toISOString()
+            };
+
+            userRef.set(data)
+                .then(function() {
+                    console.log('Save SUCCESS');
+                    setSyncStatus('synced');
+                })
+                .catch(function(error) {
+                    console.error('Save ERROR:', error);
+                    alert('Error sync: ' + error.message);
+                    setSyncStatus('synced');
+                });
+        }
+
+        function loadDataFromFirebase() {
+            if (!currentUser) {
+                console.log('Cannot load - not logged in');
+                return;
+            }
+
+            console.log('Loading from Firebase...');
+            setSyncStatus('syncing');
+            
+            var userRef = database.ref('users/' + currentUser.uid);
+            
+            userRef.once('value')
+                .then(function(snapshot) {
+                    var data = snapshot.val();
+                    console.log('Load SUCCESS, data exists:', !!data);
+                    
+                    if (data) {
+                        accounts = data.accounts || { cash: 0, bank: 0, credit: 0 };
+                        transactions = data.transactions || [];
+                        console.log('Loaded', transactions.length, 'transactions');
+                    } else {
+                        console.log('No data found, using defaults');
+                    }
+                    
+                    updateAccounts();
+                    updateDisplay();
+                    setSyncStatus('synced');
+                })
+                .catch(function(error) {
+                    console.error('Load ERROR:', error);
+                    alert('Error loading data: ' + error.message);
+                    setSyncStatus('synced');
+                });
+        }
+
+        function forceSyncData() {
+            console.log('=== MANUAL SYNC TRIGGERED ===');
+            
+            if (!currentUser) {
+                alert('Anda harus login dulu!');
+                return;
+            }
+            
+            loadDataFromFirebase();
+        }
+
+        // ===== EXPORT/IMPORT FUNCTIONS =====
+        function exportData() {
+            console.log('=== EXPORT DATA ===');
+            
+            var data = {
+                accounts: accounts,
+                transactions: transactions,
+                exportDate: new Date().toISOString(),
+                version: '1.0'
+            };
+            
+            var dataStr = JSON.stringify(data, null, 2);
+            var blob = new Blob([dataStr], { type: 'application/json' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'money-tracker-backup-' + new Date().toISOString().split('T')[0] + '.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            alert('Data berhasil diexport!');
+        }
+
+        function importData(event) {
+            console.log('=== IMPORT DATA ===');
+            
+            var file = event.target.files[0];
+            if (!file) {
+                console.log('No file selected');
+                return;
+            }
+
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    var data = JSON.parse(e.target.result);
+                    console.log('File parsed successfully');
+                    
+                    if (confirm('Import data ini? Data yang ada akan ditimpa.')) {
+                        accounts = data.accounts || { cash: 0, bank: 0, credit: 0 };
+                        transactions = data.transactions || [];
+                        
+                        console.log('Imported', transactions.length, 'transactions');
+                        
+                        saveToFirebase();
+                        updateAccounts();
+                        updateDisplay();
+                        alert('Data berhasil diimport dan disync!');
+                    }
+                } catch (err) {
+                    console.error('Import ERROR:', err);
+                    alert('File tidak valid! Pastikan file JSON yang benar.');
+                }
+            };
+            reader.onerror = function() {
+                console.error('File read ERROR');
+                alert('Gagal membaca file!');
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        function resetAllData() {
+            console.log('=== RESET DATA ===');
+            
+            if (confirm('PERINGATAN: Hapus semua data?\nData yang dihapus tidak bisa dikembalikan!')) {
+                if (confirm('Yakin? Ini adalah konfirmasi terakhir!')) {
+                    accounts = { cash: 0, bank: 0, credit: 0 };
+                    transactions = [];
+                    
+                    saveToFirebase();
+                    updateAccounts();
+                    updateDisplay();
+                    
+                    alert('Semua data telah dihapus!');
+                    console.log('Data reset complete');
+                }
+            }
+        }
+
+        // ===== TRANSACTION FUNCTIONS =====
+        function updateCategoryOptions() {
+            var type = document.getElementById('type').value;
+            var categorySelect = document.getElementById('category');
+            var categories = type === 'income' ? incomeCategories : expenseCategories;
+            
+            categorySelect.innerHTML = '<option value="">Pilih kategori...</option>';
+            for (var i = 0; i < categories.length; i++) {
+                var option = document.createElement('option');
+                option.value = categories[i];
+                option.textContent = categories[i];
+                categorySelect.appendChild(option);
+            }
+        }
+
+        function addTransaction() {
+            console.log('=== ADD TRANSACTION ===');
+            
+            var category = document.getElementById('category').value;
+            var amount = parseFloat(document.getElementById('amount').value);
+            
+            if (!category || !amount) {
+                alert('Mohon isi kategori dan jumlah!');
+                return;
+            }
+
+            if (amount <= 0) {
+                alert('Jumlah harus lebih dari 0!');
+                return;
+            }
+
+            var transaction = {
+                id: Date.now(),
+                date: document.getElementById('date').value,
+                type: document.getElementById('type').value,
+                category: category,
+                account: document.getElementById('account').value,
+                amount: amount,
+                description: document.getElementById('description').value
+            };
+
+            transactions.push(transaction);
+            console.log('Transaction added:', transaction);
+
+            var change = transaction.type === 'expense' ? -amount : amount;
+            accounts[transaction.account] += change;
+
+            saveToFirebase();
+            updateAccounts();
+            
+            document.getElementById('category').value = '';
+            document.getElementById('amount').value = '';
+            document.getElementById('description').value = '';
+            
+            alert('Transaksi berhasil ditambahkan dan disync!');
+        }
+
+        function deleteTransaction(id) {
+            console.log('=== DELETE TRANSACTION:', id, '===');
+            
+            if (!confirm('Hapus transaksi ini?')) return;
+            
+            var transaction = transactions.find(function(t) { return t.id === id; });
+            if (transaction) {
+                var change = transaction.type === 'expense' ? transaction.amount : -transaction.amount;
+                accounts[transaction.account] += change;
+                transactions = transactions.filter(function(t) { return t.id !== id; });
+                
+                console.log('Transaction deleted');
+                
+                saveToFirebase();
+                updateAccounts();
+                updateHistory();
+            }
+        }
+
+        function updateAccounts() {
+            document.getElementById('cashAmount').textContent = 'Rp ' + accounts.cash.toLocaleString('id-ID');
+            document.getElementById('bankAmount').textContent = 'Rp ' + accounts.bank.toLocaleString('id-ID');
+            document.getElementById('creditAmount').textContent = 'Rp ' + accounts.credit.toLocaleString('id-ID');
+            var total = accounts.cash + accounts.bank + accounts.credit;
+            document.getElementById('totalAmount').textContent = 'Rp ' + total.toLocaleString('id-ID');
+        }
+
+        function getFilteredTransactions() {
+            return transactions.filter(function(t) {
+                var date = new Date(t.date);
+                return date.getMonth() === selectedMonth && date.getFullYear() === selectedYear;
+            });
+        }
+
+        function updateDisplay() {
+            var monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+            document.getElementById('historyTitle').textContent = 'Riwayat Transaksi ' + monthNames[selectedMonth] + ' ' + selectedYear;
+            document.getElementById('overviewTitle').textContent = 'Overview ' + monthNames[selectedMonth] + ' ' + selectedYear;
+            updateHistory();
+            updateOverview();
+        }
+
+        function updateHistory() {
+            var html = '';
+            var filtered = getFilteredTransactions();
+            var sorted = filtered.slice().sort(function(a, b) {
+                return new Date(b.date) - new Date(a.date);
+            });
+
+            if (sorted.length === 0) {
+                html = '<div class="empty">Belum ada transaksi di bulan ini</div>';
+            } else {
+                for (var i = 0; i < sorted.length; i++) {
+                    var t = sorted[i];
+                    var accountName = t.account === 'cash' ? 'Cash' : t.account === 'bank' ? 'Bank' : 'Kartu Kredit';
+                    var icon = t.type === 'income' ? '📈' : '📉';
+                    var sign = t.type === 'income' ? '+' : '-';
+                    var amountClass = t.type === 'income' ? 'income' : 'expense';
+                    
+                    html += '<div class="transaction">';
+                    html += '<div class="transaction-info">';
+                    html += '<div class="transaction-category">' + icon + ' ' + t.category + ' (' + accountName + ')</div>';
+                    html += '<div class="transaction-date">' + new Date(t.date).toLocaleDateString('id-ID');
+                    if (t.description) html += ' - ' + t.description;
+                    html += '</div></div>';
+                    html += '<div class="transaction-amount ' + amountClass + '">' + sign + 'Rp ' + t.amount.toLocaleString('id-ID') + '</div>';
+                    html += '<button class="btn-delete" onclick="deleteTransaction(' + t.id + ')">🗑️</button>';
+                    html += '</div>';
+                }
+            }
+            
+            document.getElementById('transactions').innerHTML = html;
+        }
+
+        function updateOverview() {
+            var filtered = getFilteredTransactions();
+            var totalIncome = 0;
+            var totalExpense = 0;
+            var incomeByCategory = {};
+            var expenseByCategory = {};
+
+            for (var i = 0; i < filtered.length; i++) {
+                var t = filtered[i];
+                if (t.type === 'income') {
+                    totalIncome += t.amount;
+                    incomeByCategory[t.category] = (incomeByCategory[t.category] || 0) + t.amount;
+                } else {
+                    totalExpense += t.amount;
+                    expenseByCategory[t.category] = (expenseByCategory[t.category] || 0) + t.amount;
+                }
+            }
+
+            document.getElementById('totalIncome').textContent = 'Rp ' + totalIncome.toLocaleString('id-ID');
+            document.getElementById('totalExpense').textContent = 'Rp ' + totalExpense.toLocaleString('id-ID');
+            document.getElementById('balance').textContent = 'Rp ' + (totalIncome - totalExpense).toLocaleString('id-ID');
+
+            updateBarChart(totalIncome, totalExpense);
+            updateCategoryBreakdown(incomeByCategory, totalIncome, 'incomeBreakdown', 'income');
+            updateCategoryBreakdown(expenseByCategory, totalExpense, 'expenseBreakdown', 'expense');
+            updatePieChart(incomeByCategory, 'incomePie', 'incomeLegend');
+            updatePieChart(expenseByCategory, 'expensePie', 'expenseLegend');
+        }
+
+        function updateBarChart(income, expense) {
+            var maxValue = Math.max(income, expense) || 1;
+            var incomeHeight = (income / maxValue) * 100;
+            var expenseHeight = (expense / maxValue) * 100;
+
+            var html = '';
+            html += '<div class="bar" style="height: ' + incomeHeight + '%; background: #10b981;">';
+            html += '<span class="bar-value">Rp ' + (income / 1000).toFixed(0) + 'k</span>';
+            html += '</div>';
+            html += '<div class="bar-label">Pemasukan</div>';
+            
+            html += '<div class="bar" style="height: ' + expenseHeight + '%; background: #ef4444;">';
+            html += '<span class="bar-value">Rp ' + (expense / 1000).toFixed(0) + 'k</span>';
+            html += '</div>';
+            html += '<div class="bar-label">Pengeluaran</div>';
+
+            document.getElementById('barChart').innerHTML = html;
+        }
+
+        function updateCategoryBreakdown(categories, total, elementId, type) {
+            var html = '';
+            var sortedCategories = Object.keys(categories).sort(function(a, b) {
+                return categories[b] - categories[a];
+            });
+
+            if (sortedCategories.length === 0) {
+                html = '<div class="empty" style="padding: 20px;">Belum ada data</div>';
+            } else {
+                for (var i = 0; i < sortedCategories.length; i++) {
+                    var cat = sortedCategories[i];
+                    var amount = categories[cat];
+                    var percentage = total > 0 ? (amount / total * 100).toFixed(1) : 0;
+                    
+                    html += '<div class="category-item">';
+                    html += '<div class="category-header">';
+                    html += '<span class="category-name">' + cat + '</span>';
+                    html += '<span>' + percentage + '%</span>';
+                    html += '</div>';
+                    html += '<div class="category-header" style="margin-top: -3px;">';
+                    html += '<span style="font-size: 13px; color: #6b7280;">Rp ' + amount.toLocaleString('id-ID') + '</span>';
+                    html += '</div>';
+                    html += '<div class="progress-bar">';
+                    html += '<div class="progress-fill ' + type + '" style="width: ' + percentage + '%"></div>';
+                    html += '</div></div>';
+                }
+            }
+            
+            document.getElementById(elementId).innerHTML = html;
+        }
+
+        function updatePieChart(categories, svgId, legendId) {
+            var svg = document.getElementById(svgId);
+            var legend = document.getElementById(legendId);
+            svg.innerHTML = '';
+            legend.innerHTML = '';
+
+            var sortedCategories = Object.keys(categories).sort(function(a, b) {
+                return categories[b] - categories[a];
+            });
+
+            if (sortedCategories.length === 0) {
+                svg.innerHTML = '<text x="100" y="100" text-anchor="middle" fill="#9ca3af">Tidak ada data</text>';
+                return;
+            }
+
+            var total = 0;
+            for (var i = 0; i < sortedCategories.length; i++) {
+                total += categories[sortedCategories[i]];
+            }
+
+            var currentAngle = 0;
+            for (var i = 0; i < sortedCategories.length; i++) {
+                var cat = sortedCategories[i];
+                var value = categories[cat];
+                var percentage = (value / total) * 100;
+                var angle = (value / total) * 360;
+                
+                var x1 = 100 + 80 * Math.cos((currentAngle - 90) * Math.PI / 180);
+                var y1 = 100 + 80 * Math.sin((currentAngle - 90) * Math.PI / 180);
+                var x2 = 100 + 80 * Math.cos((currentAngle + angle - 90) * Math.PI / 180);
+                var y2 = 100 + 80 * Math.sin((currentAngle + angle - 90) * Math.PI / 180);
+                
+                var largeArc = angle > 180 ? 1 : 0;
+                
+                var path = 'M 100 100 L ' + x1 + ' ' + y1 + ' A 80 80 0 ' + largeArc + ' 1 ' + x2 + ' ' + y2 + ' Z';
+                
+                var slice = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                slice.setAttribute('d', path);
+                slice.setAttribute('fill', pieColors[i % pieColors.length]);
+                slice.setAttribute('class', 'pie-slice');
+                svg.appendChild(slice);
+
+                var legendItem = document.createElement('div');
+                legendItem.className = 'legend-item';
+                legendItem.innerHTML = '<div class="legend-color" style="background: ' + pieColors[i % pieColors.length] + '"></div>' +
+                                      '<span>' + cat + ' (' + percentage.toFixed(1) + '%)</span>';
+                legend.appendChild(legendItem);
+                
+                currentAngle += angle;
+            }
+        }
+
+        // ===== EVENT LISTENERS =====
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('=== DOM LOADED - SETTING UP EVENT LISTENERS ===');
+            
+            // Auth buttons
+            var loginBtn = document.getElementById('loginBtn');
+            var registerBtn = document.getElementById('registerBtn');
+            var logoutBtn = document.getElementById('logoutBtn');
+            
+            if (loginBtn) {
+                console.log('Login button found');
+                loginBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    console.log('Login button CLICKED');
+                    loginUser();
+                });
+            }
+            
+            if (registerBtn) {
+                console.log('Register button found');
+                registerBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    console.log('Register button CLICKED');
+                    registerUser();
+                });
+            }
+            
+            if (logoutBtn) {
+                console.log('Logout button found');
+                logoutBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    console.log('Logout button CLICKED');
+                    logoutUser();
+                });
+            }
+            
+            // Enter key to login
+            var authPassword = document.getElementById('authPassword');
+            if (authPassword) {
+                authPassword.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        console.log('Enter pressed - attempting login');
+                        loginUser();
+                    }
+                });
+            }
+            
+            // Action buttons
+            var syncBtn = document.getElementById('syncBtn');
+            var exportBtn = document.getElementById('exportBtn');
+            var importBtn = document.getElementById('importBtn');
+            var resetBtn = document.getElementById('resetBtn');
+            var importFile = document.getElementById('importFile');
+            
+            if (syncBtn) {
+                syncBtn.addEventListener('click', forceSyncData);
+            }
+            
+            if (exportBtn) {
+                exportBtn.addEventListener('click', exportData);
+            }
+            
+            if (importBtn) {
+                importBtn.addEventListener('click', function() {
+                    importFile.click();
+                });
+            }
+            
+            if (importFile) {
+                importFile.addEventListener('change', importData);
+            }
+            
+            if (resetBtn) {
+                resetBtn.addEventListener('click', resetAllData);
+            }
+            
+            // Month/Year selectors
+            var monthSelect = document.getElementById('monthSelect');
+            var yearSelect = document.getElementById('yearSelect');
+            
+            if (monthSelect) {
+                monthSelect.addEventListener('change', function() {
+                    selectedMonth = parseInt(this.value);
+                    updateDisplay();
+                });
+            }
+            
+            if (yearSelect) {
+                yearSelect.addEventListener('change', function() {
+                    selectedYear = parseInt(this.value);
+                    updateDisplay();
+                });
+            }
+            
+            // Type selector
+            var typeSelect = document.getElementById('type');
+            if (typeSelect) {
+                typeSelect.addEventListener('change', updateCategoryOptions);
+            }
+            
+            // Add transaction button
+            var addTransactionBtn = document.getElementById('addTransactionBtn');
+            if (addTransactionBtn) {
+                addTransactionBtn.addEventListener('click', addTransaction);
+            }
+            
+            // Tab buttons
+            var tabButtons = document.querySelectorAll('.tab');
+            for (var i = 0; i < tabButtons.length; i++) {
+                tabButtons[i].addEventListener('click', function() {
+                    var tabIndex = this.getAttribute('data-tab');
+                    
+                    // Update tab buttons
+                    var allTabs = document.querySelectorAll('.tab');
+                    for (var j = 0; j < allTabs.length; j++) {
+                        allTabs[j].classList.remove('active');
+                    }
+                    this.classList.add('active');
+                    
+                    // Update tab content
+                    var allContents = document.querySelectorAll('.tab-content');
+                    for (var j = 0; j < allContents.length; j++) {
+                        allContents[j].classList.remove('active');
+                    }
+                    document.getElementById('tab' + tabIndex).classList.add('active');
+                    
+                    // Update content if needed
+                    if (tabIndex === '1') {
+                        updateHistory();
+                    } else if (tabIndex === '2') {
+                        updateOverview();
+                    }
+                });
+            }
+            
+            // Initialize
+            document.getElementById('date').value = new Date().toISOString().split('T')[0];
+            document.getElementById('monthSelect').value = selectedMonth;
+            document.getElementById('yearSelect').value = selectedYear;
+            updateCategoryOptions();
+            
+            console.log('=== SETUP COMPLETE ===');
+        });
+    </script>
+</body>
+</html>
